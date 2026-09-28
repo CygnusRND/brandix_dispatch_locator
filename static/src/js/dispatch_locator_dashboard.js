@@ -180,6 +180,14 @@ export class DispatchLocatorDashboard extends Component {
         return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
     }
 
+    formatText(val) {
+        if (!val && val !== 0) return "-";
+        if (typeof val === "object") {
+            return val.en_US || Object.values(val)[0] || "-";
+        }
+        return String(val);
+    }
+
     switchTab(tab) {
         this.resetInactivityTimer();
         this.state.activeTab = tab;

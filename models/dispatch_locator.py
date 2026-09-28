@@ -499,7 +499,7 @@ class BrandixDispatchLocator(models.TransientModel):
                     bcr.component_type,
                     bcr.style_code,
                     bcr.color_name,
-                    pt.name as docket_name,
+                    COALESCE(pt.name->>'en_US', pt.name->>'default', pt.name::text) as docket_name,
                     bsm.name as schedule_name
                 FROM brandix_component_receipt_line bcrl
                 JOIN brandix_component_receipt bcr ON bcrl.receipt_id = bcr.id
@@ -514,20 +514,26 @@ class BrandixDispatchLocator(models.TransientModel):
             with self.env.cr.savepoint():
                 self.env.cr.execute(sql_loc_comps, (location.id,))
                 rows_cl = self.env.cr.dictfetchall()
+
+            def _clean_str(val):
+                if isinstance(val, dict):
+                    return val.get('en_US') or val.get(self.env.lang) or next(iter(val.values()), '') if val else ''
+                return str(val).strip() if val is not None and str(val).strip() else ''
+
             for cl in rows_cl:
                 comp_type_label = 'TRIMS' if cl.get('component_type') == 'trim' else 'EMB'
-                d_name = cl.get('docket_name') or cl.get('barcode') or '-'
-                s_name = cl.get('schedule_name') or '-'
+                d_name = _clean_str(cl.get('docket_name')) or _clean_str(cl.get('barcode')) or '-'
+                s_name = _clean_str(cl.get('schedule_name')) or '-'
                 stored_items.append({
                     'parcel_id': cl.get('line_id'),
                     'parcel_name': f"[{comp_type_label}] Parcel #{cl.get('parcel_no')} ({cl.get('receipt_name')})",
                     'parcel_number': cl.get('parcel_no'),
                     'docket_no': d_name,
                     'schedule_no': s_name,
-                    'style_code': cl.get('style_code') or '-',
-                    'color_name': cl.get('color_name') or '-',
+                    'style_code': _clean_str(cl.get('style_code')) or '-',
+                    'color_name': _clean_str(cl.get('color_name')) or '-',
                     'module_fr': '-',
-                    'grn_name': cl.get('receipt_name'),
+                    'grn_name': _clean_str(cl.get('receipt_name')),
                     'history_count': 0
                 })
         except Exception as e:

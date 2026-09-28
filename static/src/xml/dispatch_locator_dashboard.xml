@@ -750,15 +750,15 @@
                                             <tbody>
                                                 <t t-foreach="lres.items" t-as="item" t-key="item.parcel_id">
                                                     <tr>
-                                                        <td class="fw-bold text-primary" t-esc="item.parcel_name"></td>
-                                                        <td class="fw-bold font-monospace" t-esc="item.docket_no"></td>
-                                                        <td t-esc="item.schedule_no"></td>
-                                                        <td t-esc="item.style_code"></td>
-                                                        <td t-esc="item.color_name"></td>
-                                                        <td class="text-muted small" t-esc="item.grn_name"></td>
+                                                        <td class="fw-bold text-primary" t-esc="this.formatText(item.parcel_name)"></td>
+                                                        <td class="fw-bold font-monospace" t-esc="this.formatText(item.docket_no)"></td>
+                                                        <td t-esc="this.formatText(item.schedule_no)"></td>
+                                                        <td t-esc="this.formatText(item.style_code)"></td>
+                                                        <td t-esc="this.formatText(item.color_name)"></td>
+                                                        <td class="text-muted small" t-esc="this.formatText(item.grn_name)"></td>
                                                         <td>
                                                             <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
-                                                                    t-on-click="() => this.quickSearch(item.docket_no)">
+                                                                    t-on-click="() => this.quickSearch(this.formatText(item.docket_no))">
                                                                 View Docket
                                                             </button>
                                                         </td>
