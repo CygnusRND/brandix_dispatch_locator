@@ -150,80 +150,9 @@ class BrandixDispatchLocator(models.TransientModel):
             docket._compute_component_statuses()
 
         # 3. Trims Readiness & Location
-        CompReceipt = self.env['brandix.component.receipt'].sudo() if 'brandix.component.receipt' in self.env else None
-        CompReceiptLine = self.env['brandix.component.receipt.line'].sudo() if 'brandix.component.receipt.line' in self.env else None
-
-        trims_location = 'Not Assigned'
-        trims_locations_list = []
-        has_validated_trims = False
-
-        if CompReceiptLine:
-            domain = [
-                ('receipt_id.component_type', '=', 'trim'),
-                ('receipt_id.state', '=', 'validated'),
-                ('location_id', '!=', False)
-            ]
-            or_conditions = [
-                ('barcode', '=ilike', docket.name),
-                ('receipt_id.docket_id', '=', docket.id),
-                ('receipt_id.docket_ids', 'in', [docket.id])
-            ]
-            if sched:
-                or_conditions.extend([
-                    ('receipt_id.schedule_master_id', '=', sched.id),
-                    ('receipt_id.schedule_master_ids', 'in', [sched.id])
-                ])
-            if docket.schedule_no:
-                clean_sno = str(docket.schedule_no).strip()
-                or_conditions.append(('barcode', '=ilike', clean_sno))
-                or_conditions.append(('receipt_id.schedule_master_id.name', '=ilike', clean_sno))
-
-            match_domain = []
-            for _i in range(len(or_conditions) - 1):
-                match_domain.append('|')
-            match_domain.extend(or_conditions)
-
-            matching_lines = CompReceiptLine.search(domain + match_domain)
-            if matching_lines:
-                has_validated_trims = True
-                for l in matching_lines:
-                    if l.location_id:
-                        loc_name = l.location_id.name or l.location_id.complete_name
-                        if loc_name and loc_name not in trims_locations_list:
-                            trims_locations_list.append(loc_name)
-
-        if not trims_locations_list and CompReceipt:
-            r_domain = [('component_type', '=', 'trim'), ('state', '=', 'validated')]
-            r_or = [('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
-            if sched:
-                r_or.extend([
-                    ('schedule_master_id', '=', sched.id),
-                    ('schedule_master_ids', 'in', [sched.id])
-                ])
-            if docket.schedule_no:
-                r_or.append(('schedule_master_id.name', '=ilike', str(docket.schedule_no).strip()))
-
-            r_match = []
-            for _i in range(len(r_or) - 1):
-                r_match.append('|')
-            r_match.extend(r_or)
-
-            matching_receipts = CompReceipt.search(r_domain + r_match)
-            if matching_receipts:
-                has_validated_trims = True
-                for r in matching_receipts:
-                    for l in r.parcel_line_ids:
-                        if l.location_id:
-                            lname = l.location_id.name or l.location_id.complete_name
-                            if lname and lname not in trims_locations_list:
-                                trims_locations_list.append(lname)
-                    if not trims_locations_list and r.location_summary and r.location_summary != '-':
-                        trims_locations_list.append(r.location_summary)
-
-        if trims_locations_list:
-            trims_location = ", ".join(trims_locations_list)
-        elif has_validated_trims:
-            trims_location = 'In Store'
+        trims_data = self._get_component_info(docket, sched, comp_type='trim')
+        has_validated_trims = trims_data['has_validated']
+        trims_location = trims_data['location_display']
 
         trims_status = docket.trims_status or (sched.trims_status if sched else 'pending')
         carrier_docket_name = docket.trims_issued_with_docket_id.name if docket.trims_issued_with_docket_id else ''
@@ -255,78 +184,9 @@ class BrandixDispatchLocator(models.TransientModel):
         emb_pool_received = getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0
         emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
 
-        # Check direct EMB receipts & parcel lines
-        has_validated_emb = False
-        emb_location = 'Not Assigned'
-        emb_locations_list = []
-
-        if is_emb and CompReceiptLine:
-            domain = [
-                ('receipt_id.component_type', '=', 'emb'),
-                ('receipt_id.state', '=', 'validated'),
-                ('location_id', '!=', False)
-            ]
-            or_conditions = [
-                ('barcode', '=ilike', docket.name),
-                ('receipt_id.docket_id', '=', docket.id),
-                ('receipt_id.docket_ids', 'in', [docket.id])
-            ]
-            if sched:
-                or_conditions.extend([
-                    ('receipt_id.schedule_master_id', '=', sched.id),
-                    ('receipt_id.schedule_master_ids', 'in', [sched.id])
-                ])
-            if docket.schedule_no:
-                clean_sno = str(docket.schedule_no).strip()
-                or_conditions.append(('barcode', '=ilike', clean_sno))
-                or_conditions.append(('receipt_id.schedule_master_id.name', '=ilike', clean_sno))
-
-            match_domain = []
-            for _i in range(len(or_conditions) - 1):
-                match_domain.append('|')
-            match_domain.extend(or_conditions)
-
-            matching_emb_lines = CompReceiptLine.search(domain + match_domain)
-            if matching_emb_lines:
-                has_validated_emb = True
-                for l in matching_emb_lines:
-                    if l.location_id:
-                        loc_name = l.location_id.name or l.location_id.complete_name
-                        if loc_name and loc_name not in emb_locations_list:
-                            emb_locations_list.append(loc_name)
-
-        if not emb_locations_list and is_emb and CompReceipt:
-            r_domain = [('component_type', '=', 'emb'), ('state', '=', 'validated')]
-            r_or = [('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
-            if sched:
-                r_or.extend([
-                    ('schedule_master_id', '=', sched.id),
-                    ('schedule_master_ids', 'in', [sched.id])
-                ])
-            if docket.schedule_no:
-                r_or.append(('schedule_master_id.name', '=ilike', str(docket.schedule_no).strip()))
-
-            r_match = []
-            for _i in range(len(r_or) - 1):
-                r_match.append('|')
-            r_match.extend(r_or)
-
-            matching_emb_receipts = CompReceipt.search(r_domain + r_match)
-            if matching_emb_receipts:
-                has_validated_emb = True
-                for r in matching_emb_receipts:
-                    for l in r.parcel_line_ids:
-                        if l.location_id:
-                            lname = l.location_id.name or l.location_id.complete_name
-                            if lname and lname not in emb_locations_list:
-                                emb_locations_list.append(lname)
-                    if not emb_locations_list and r.location_summary and r.location_summary != '-':
-                        emb_locations_list.append(r.location_summary)
-
-        if emb_locations_list:
-            emb_location = ", ".join(emb_locations_list)
-        elif has_validated_emb:
-            emb_location = 'In Store'
+        emb_data = self._get_component_info(docket, sched, comp_type='emb') if is_emb else {'has_validated': False, 'location_display': 'Not Assigned'}
+        has_validated_emb = emb_data['has_validated']
+        emb_location = emb_data['location_display']
 
         req_emb_qty = docket.docket_qty or docket.co_qty or 0.0
         is_emb_ready = (
@@ -532,6 +392,107 @@ class BrandixDispatchLocator(models.TransientModel):
             },
             'items': stored_items
         }
+
+    @api.model
+    def _get_component_info(self, docket, sched, comp_type='trim'):
+        """
+        Retrieves receipt state and physical bin/rack storage location for Trims or Embellishments.
+        Checks both docket-level and schedule-level component receipts cleanly without ORM join traps.
+        """
+        try:
+            CompReceipt = self.env['brandix.component.receipt'].sudo() if 'brandix.component.receipt' in self.env else None
+            CompReceiptLine = self.env['brandix.component.receipt.line'].sudo() if 'brandix.component.receipt.line' in self.env else None
+
+            if not CompReceipt:
+                return {'has_validated': False, 'location_display': 'Not Assigned'}
+
+            matching_receipts = CompReceipt.browse()
+            locations = []
+
+            # 1. Search by direct docket_id
+            if docket and docket.id:
+                matching_receipts |= CompReceipt.search([
+                    ('component_type', '=', comp_type),
+                    ('state', '=', 'validated'),
+                    ('docket_id', '=', docket.id)
+                ])
+
+            # 2. Search by schedule_master_id if schedule exists
+            schedules = docket.schedule_master_ids or (docket.schedule_master_id if hasattr(docket, 'schedule_master_id') else False) or sched
+            sched_ids = [s.id for s in schedules if s and s.id] if hasattr(schedules, '__iter__') else ([sched.id] if sched and sched.id else [])
+            if sched_ids:
+                matching_receipts |= CompReceipt.search([
+                    ('component_type', '=', comp_type),
+                    ('state', '=', 'validated'),
+                    ('schedule_master_id', 'in', sched_ids)
+                ])
+
+            # 3. Fallback: Search by schedule_no string
+            if docket.schedule_no:
+                sched_names = [s.strip() for s in str(docket.schedule_no).replace(';', ',').split(',') if s.strip()]
+                if sched_names:
+                    matching_receipts |= CompReceipt.search([
+                        ('component_type', '=', comp_type),
+                        ('state', '=', 'validated'),
+                        ('schedule_master_id.name', 'in', sched_names)
+                    ])
+
+            # 4. Extract locations from matching receipts
+            for rec in matching_receipts:
+                for line in rec.parcel_line_ids:
+                    if line.location_id:
+                        loc_name = line.location_id.name or line.location_id.complete_name
+                        if loc_name and loc_name not in locations:
+                            locations.append(loc_name)
+                # If parcel lines had no locations yet, check location_summary
+                if not locations and rec.location_summary and rec.location_summary != '-':
+                    for part in str(rec.location_summary).split(','):
+                        clean_part = part.strip()
+                        if clean_part and clean_part not in locations:
+                            locations.append(clean_part)
+
+            # 5. Direct search on brandix.component.receipt.line by barcode or receipt
+            if CompReceiptLine:
+                barcode_targets = set()
+                if docket.name:
+                    barcode_targets.add(docket.name.strip())
+                if hasattr(docket, 'docket_number') and docket.docket_number:
+                    barcode_targets.add(docket.docket_number.strip())
+                if docket.schedule_no:
+                    for s in str(docket.schedule_no).replace(';', ',').split(','):
+                        if s.strip():
+                            barcode_targets.add(s.strip())
+                if sched and getattr(sched, 'name', None):
+                    barcode_targets.add(sched.name.strip())
+
+                for code in barcode_targets:
+                    lines = CompReceiptLine.search([
+                        ('receipt_id.component_type', '=', comp_type),
+                        ('receipt_id.state', '=', 'validated'),
+                        ('barcode', '=ilike', code),
+                        ('location_id', '!=', False)
+                    ])
+                    for l in lines:
+                        matching_receipts |= l.receipt_id
+                        loc_name = l.location_id.name or l.location_id.complete_name
+                        if loc_name and loc_name not in locations:
+                            locations.append(loc_name)
+
+            has_validated = len(matching_receipts) > 0
+            if locations:
+                location_display = ", ".join(locations)
+            elif has_validated:
+                location_display = 'In Store'
+            else:
+                location_display = 'Not Assigned'
+
+            return {
+                'has_validated': has_validated,
+                'location_display': location_display
+            }
+        except Exception as e:
+            _logger.exception("Error getting component info for docket %s: %s", getattr(docket, 'name', 'unknown'), str(e))
+            return {'has_validated': False, 'location_display': 'Not Assigned'}
 
     @api.model
     def get_warehouse_racks_overview(self):
