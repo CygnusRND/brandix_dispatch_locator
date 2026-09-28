@@ -155,8 +155,9 @@
                         <!-- JOB DETAILS CARD -->
                         <div class="card border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
                             <div class="card-header bg-dark text-white px-4 py-3 d-flex justify-content-between align-items-center">
-                                <span class="fs-4 fw-bold">
-                                    <i class="fa fa-id-card me-2 text-info"></i> JOB DETAILS : <span class="text-warning font-monospace" t-esc="res.job.docket_no"></span>
+                                <span class="fs-4 fw-bold d-flex align-items-center gap-2">
+                                    <i class="fa fa-id-card text-info"></i> JOB DETAILS : 
+                                    <span class="badge bg-warning text-dark fs-3 fw-black px-3 py-1 font-monospace shadow-sm" style="color: #000000 !important; background-color: #ffc107 !important; font-weight: 900 !important; letter-spacing: 0.5px;" t-esc="res.job.docket_no"></span>
                                 </span>
                                 <span class="badge fs-6 px-3 py-2 rounded-pill"
                                       t-att-class="res.job.is_label_printed ? 'bg-success' : 'bg-warning text-dark'">

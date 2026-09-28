@@ -13,80 +13,136 @@ class BrandixDispatchLocator(models.TransientModel):
         """
         Unified Smart Search for Smart Board Dashboard:
         Searches by Docket Number, Schedule Number, Style Code, or Location/Rack name.
+        Supports fuzzy and normalized input (e.g. KD-A4B9, KD - A4B9, JG5-J:KD-A4B9, partial schedules).
         Returns comprehensive real-time status and physical locations.
         """
         try:
             if not search_term or not str(search_term).strip():
                 return {'status': 'empty'}
 
-            term = str(search_term).strip()
-            clean_term = term.upper()
-            if ':' in clean_term:
-                job_core = clean_term.split(':')[-1].strip()
-            else:
-                job_core = clean_term
+            raw = str(search_term).strip()
+            raw_upper = raw.upper()
+            no_spaces = raw_upper.replace(" ", "")
+
+            # Build candidate search keys in priority order
+            keys = []
+            for k in [raw, raw_upper, no_spaces]:
+                if k and k not in keys:
+                    keys.append(k)
+
+            # Handle colon format e.g. "JG5-J:KD-A4B9"
+            if ':' in raw_upper:
+                colon_part = raw_upper.split(':')[-1].strip()
+                if colon_part and colon_part not in keys:
+                    keys.append(colon_part)
+                clean_colon = colon_part.replace(" ", "")
+                if clean_colon and clean_colon not in keys:
+                    keys.append(clean_colon)
+
+            # Handle hyphen format e.g. "KD-A4B9" or "KD - A4B9"
+            if '-' in raw_upper:
+                no_hyphen = raw_upper.replace("-", "").replace(" ", "")
+                if len(no_hyphen) >= 3 and no_hyphen not in keys:
+                    keys.append(no_hyphen)
+                for part in raw_upper.split('-'):
+                    p = part.strip()
+                    if len(p) >= 3 and p not in keys:
+                        keys.append(p)
 
             ProductTemplate = self.env['product.template'].sudo()
             ScheduleMaster = self.env['brandix.schedule.master'].sudo() if 'brandix.schedule.master' in self.env else None
             StockLocation = self.env['stock.location'].sudo()
 
             # 1. First Priority: Check if search matches a Docket Master
-            docket = ProductTemplate.search([
-                ('is_docket', '=', True),
-                ('active', '=', True),
-                '|', '|',
-                ('name', '=ilike', clean_term),
-                ('name', '=ilike', f"%{job_core}%"),
-                ('docket_number', '=ilike', clean_term)
-            ], limit=1)
+            docket = None
+            for k in keys:
+                docket = ProductTemplate.search([
+                    ('is_docket', '=', True),
+                    ('active', '=', True),
+                    '|',
+                    ('name', '=ilike', k),
+                    ('docket_number', '=ilike', k)
+                ], limit=1)
+                if docket:
+                    break
+
+            if not docket:
+                for k in keys:
+                    if len(k) >= 3:
+                        docket = ProductTemplate.search([
+                            ('is_docket', '=', True),
+                            ('active', '=', True),
+                            '|',
+                            ('name', '=ilike', f"%{k}%"),
+                            ('docket_number', '=ilike', f"%{k}%")
+                        ], limit=1)
+                        if docket:
+                            break
 
             if docket:
                 return self._build_docket_details(docket)
 
             # 2. Second Priority: Check if search matches a Schedule Number
-            sched_recs = ScheduleMaster.search([
-                ('name', '=ilike', clean_term)
-            ], limit=1) if ScheduleMaster else None
+            sched = None
+            if ScheduleMaster:
+                for k in keys:
+                    sched = ScheduleMaster.search([
+                        ('name', '=ilike', k)
+                    ], limit=1)
+                    if sched:
+                        break
+                if not sched:
+                    for k in keys:
+                        if len(k) >= 3:
+                            sched = ScheduleMaster.search([
+                                ('name', '=ilike', f"%{k}%")
+                            ], limit=1)
+                            if sched:
+                                break
 
-            if not sched_recs:
-                matching_dockets = ProductTemplate.search([
-                    ('is_docket', '=', True),
-                    ('active', '=', True),
-                    ('schedule_no', '=ilike', f"%{clean_term}%")
-                ])
-                if matching_dockets:
-                    return self._build_schedule_details_from_dockets(clean_term, matching_dockets)
-            else:
-                return self._build_schedule_details(sched_recs[0])
+            if sched:
+                return self._build_schedule_details(sched)
+
+            # Fallback to schedule_no on product.template
+            for k in keys:
+                if len(k) >= 3:
+                    matching_dockets = ProductTemplate.search([
+                        ('is_docket', '=', True),
+                        ('active', '=', True),
+                        ('schedule_no', '=ilike', f"%{k}%")
+                    ])
+                    if matching_dockets:
+                        return self._build_schedule_details_from_dockets(k, matching_dockets)
 
             # 3. Third Priority: Check if search matches a Style Code
-            style_dockets = ProductTemplate.search([
-                ('is_docket', '=', True),
-                ('active', '=', True),
-                '|',
-                ('style_code', '=ilike', clean_term),
-                ('style_code', '=ilike', f"%{clean_term}%")
-            ], order='id asc')
-
-            if style_dockets:
-                return self._build_schedule_details_from_dockets(f"Style: {clean_term}", style_dockets)
+            for k in keys:
+                if len(k) >= 3:
+                    style_dockets = ProductTemplate.search([
+                        ('is_docket', '=', True),
+                        ('active', '=', True),
+                        '|',
+                        ('style_code', '=ilike', k),
+                        ('style_code', '=ilike', f"%{k}%")
+                    ], order='id asc')
+                    if style_dockets:
+                        return self._build_schedule_details_from_dockets(f"Style: {k}", style_dockets)
 
             # 4. Fourth Priority: Check if search matches a Location (Rack / Bin)
-            location = StockLocation.search([
-                ('usage', '=', 'internal'),
-                '|', '|',
-                ('name', '=ilike', clean_term),
-                ('name', '=ilike', f"%{clean_term}%"),
-                ('complete_name', '=ilike', f"%{clean_term}%")
-            ], limit=1)
-
-            if location:
-                return self._build_location_details(location)
+            for k in keys:
+                location = StockLocation.search([
+                    ('usage', '=', 'internal'),
+                    '|', '|',
+                    ('name', '=ilike', k),
+                    ('name', '=ilike', f"%{k}%"),
+                    ('complete_name', '=ilike', f"%{k}%")
+                ], limit=1)
+                if location:
+                    return self._build_location_details(location)
 
             return {
                 'status': 'not_found',
-                'search_term': term,
-                'message': _("No Docket, Schedule, Style, or Rack found matching '%s'") % term
+                'search_term': raw,
+                'message': _("No Docket, Schedule, Style, or Rack found matching '%s'") % raw
             }
         except Exception as e:
             _logger.exception("Error executing dispatch locator search for '%s': %s", search_term, str(e))
@@ -147,7 +203,10 @@ class BrandixDispatchLocator(models.TransientModel):
 
         # Force fresh compute of component statuses on docket
         if hasattr(docket, '_compute_component_statuses'):
-            docket._compute_component_statuses()
+            try:
+                docket._compute_component_statuses()
+            except Exception as e:
+                _logger.warning("Could not recompute component statuses for %s: %s", getattr(docket, 'name', 'unknown'), str(e))
 
         # 3. Trims Readiness & Location
         trims_data = self._get_component_info(docket, sched, comp_type='trim')
@@ -264,30 +323,37 @@ class BrandixDispatchLocator(models.TransientModel):
         sched.ensure_one()
         ProductTemplate = self.env['product.template'].sudo()
 
-        dockets = ProductTemplate.search([
-            ('is_docket', '=', True),
-            ('active', '=', True),
-            '|', '|',
-            ('schedule_master_ids', 'in', [sched.id]),
-            ('schedule_master_id', '=', sched.id),
-            ('schedule_no', '=ilike', f"%{sched.name}%")
-        ], order='id asc')
+        dockets = getattr(sched, 'docket_ids', False)
+        if dockets:
+            dockets = dockets.filtered(lambda d: d.is_docket and d.active)
+        if not dockets:
+            dockets = ProductTemplate.search([
+                ('is_docket', '=', True),
+                ('active', '=', True),
+                '|', '|',
+                ('schedule_master_ids', 'in', [sched.id]),
+                ('schedule_master_id', '=', sched.id),
+                ('schedule_no', '=ilike', f"%{sched.name}%")
+            ], order='id asc')
 
         dockets_summary = []
         for doc in dockets:
-            doc_data = self._build_docket_details(doc)
-            dockets_summary.append({
-                'docket_id': doc.id,
-                'docket_no': doc.name,
-                'co_qty': doc.co_qty,
-                'module_fr': doc.fr_module or doc.module or '-',
-                'delivery_status': doc.delivery_status or 'pending',
-                'can_issue': doc_data['decision']['can_issue'],
-                'decision': doc_data['decision'],
-                'parcels': doc_data['parcels'],
-                'trims': doc_data['trims'],
-                'emb': doc_data['emb']
-            })
+            try:
+                doc_data = self._build_docket_details(doc)
+                dockets_summary.append({
+                    'docket_id': doc.id,
+                    'docket_no': doc.name,
+                    'co_qty': getattr(doc, 'co_qty', 0.0),
+                    'module_fr': getattr(doc, 'fr_module', '') or getattr(doc, 'module', '') or '-',
+                    'delivery_status': getattr(doc, 'delivery_status', 'pending') or 'pending',
+                    'can_issue': doc_data['decision']['can_issue'],
+                    'decision': doc_data['decision'],
+                    'parcels': doc_data['parcels'],
+                    'trims': doc_data['trims'],
+                    'emb': doc_data['emb']
+                })
+            except Exception as e:
+                _logger.warning("Error building docket details for %s in schedule %s: %s", getattr(doc, 'name', 'unknown'), getattr(sched, 'name', 'unknown'), str(e))
 
         # Schedule-level component locations
         sched_trims = self._get_component_info(None, sched, comp_type='trim')
@@ -325,19 +391,22 @@ class BrandixDispatchLocator(models.TransientModel):
         first_doc = dockets[0]
         dockets_summary = []
         for doc in dockets:
-            doc_data = self._build_docket_details(doc)
-            dockets_summary.append({
-                'docket_id': doc.id,
-                'docket_no': doc.name,
-                'co_qty': doc.co_qty,
-                'module_fr': doc.fr_module or doc.module or '-',
-                'delivery_status': doc.delivery_status or 'pending',
-                'can_issue': doc_data['decision']['can_issue'],
-                'decision': doc_data['decision'],
-                'parcels': doc_data['parcels'],
-                'trims': doc_data['trims'],
-                'emb': doc_data['emb']
-            })
+            try:
+                doc_data = self._build_docket_details(doc)
+                dockets_summary.append({
+                    'docket_id': doc.id,
+                    'docket_no': doc.name,
+                    'co_qty': getattr(doc, 'co_qty', 0.0),
+                    'module_fr': getattr(doc, 'fr_module', '') or getattr(doc, 'module', '') or '-',
+                    'delivery_status': getattr(doc, 'delivery_status', 'pending') or 'pending',
+                    'can_issue': doc_data['decision']['can_issue'],
+                    'decision': doc_data['decision'],
+                    'parcels': doc_data['parcels'],
+                    'trims': doc_data['trims'],
+                    'emb': doc_data['emb']
+                })
+            except Exception as e:
+                _logger.warning("Error building docket details for %s in schedule %s: %s", getattr(doc, 'name', 'unknown'), sched_name, str(e))
 
         first_trims = self._get_component_info(first_doc, None, comp_type='trim')
         first_emb = self._get_component_info(first_doc, None, comp_type='emb')
@@ -418,8 +487,10 @@ class BrandixDispatchLocator(models.TransientModel):
                   AND bcr.state = 'validated'
                 ORDER BY bcr.id DESC, bcrl.parcel_no ASC
             """
-            self.env.cr.execute(sql_loc_comps, (location.id,))
-            for cl in self.env.cr.dictfetchall():
+            with self.env.cr.savepoint():
+                self.env.cr.execute(sql_loc_comps, (location.id,))
+                rows_cl = self.env.cr.dictfetchall()
+            for cl in rows_cl:
                 comp_type_label = 'TRIMS' if cl.get('component_type') == 'trim' else 'EMB'
                 d_name = cl.get('docket_name') or cl.get('barcode') or '-'
                 s_name = cl.get('schedule_name') or '-'
@@ -504,13 +575,55 @@ class BrandixDispatchLocator(models.TransientModel):
             has_validated = False
             parcels_info = []
 
-            # 1. Direct SQL on brandix_component_receipt_line joined with brandix_component_receipt and stock_location
+            # 1. Safely check if relation tables exist
+            has_rel_docket = False
+            has_rel_sched = False
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'component_receipt_docket_rel' LIMIT 1")
+                    has_rel_docket = bool(self.env.cr.fetchone())
+            except Exception:
+                has_rel_docket = False
+
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'component_receipt_schedule_rel' LIMIT 1")
+                    has_rel_sched = bool(self.env.cr.fetchone())
+            except Exception:
+                has_rel_sched = False
+
+            # Direct SQL on brandix_component_receipt_line joined with brandix_component_receipt and stock_location
             exact_barcodes = list(barcode_patterns) or ['']
             ilike_barcodes = [f"%{b}%" for b in barcode_patterns if b] or ['%NONE%']
             exact_sched_names = sched_name_list
             ilike_sched_names = [f"%{s}%" for s in sched_name_list if s] or ['%NONE%']
 
-            sql = """
+            where_clauses = [
+                "bcrl.barcode = ANY(%s)",
+                "bcrl.barcode ILIKE ANY(%s)",
+                "(bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)",
+                "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))",
+                "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id IN (SELECT id FROM brandix_schedule_master WHERE name = ANY(%s) OR name ILIKE ANY(%s)))"
+            ]
+            params = [
+                comp_type,
+                exact_barcodes,
+                ilike_barcodes,
+                docket_id,
+                sched_id_list,
+                exact_sched_names,
+                ilike_sched_names
+            ]
+
+            if has_rel_docket and docket_id:
+                where_clauses.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))")
+                params.append(docket_id)
+
+            if has_rel_sched and sched_id_list and sched_id_list != [0]:
+                where_clauses.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))")
+                params.append(sched_id_list)
+
+            sql = f"""
                 SELECT DISTINCT
                     sl.id as location_id,
                     sl.name as location_name,
@@ -526,33 +639,15 @@ class BrandixDispatchLocator(models.TransientModel):
                 WHERE bcr.state = 'validated'
                   AND bcr.component_type = %s
                   AND (
-                      bcrl.barcode = ANY(%s)
-                      OR bcrl.barcode ILIKE ANY(%s)
-                      OR (bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)
-                      OR (bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))
-                      OR (bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))
-                      OR (bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))
-                      OR (bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id IN (
-                          SELECT id FROM brandix_schedule_master WHERE name = ANY(%s) OR name ILIKE ANY(%s)
-                      ))
+                      {' OR '.join(where_clauses)}
                   )
                 ORDER BY bcr.id DESC, bcrl.parcel_no ASC
             """
 
-            params = (
-                comp_type,
-                exact_barcodes,
-                ilike_barcodes,
-                docket_id,
-                docket_id,
-                sched_id_list,
-                sched_id_list,
-                exact_sched_names,
-                ilike_sched_names
-            )
-
-            self.env.cr.execute(sql, params)
-            rows = self.env.cr.dictfetchall()
+            rows = []
+            with self.env.cr.savepoint():
+                self.env.cr.execute(sql, tuple(params))
+                rows = self.env.cr.dictfetchall()
 
             History = self.env['brandix.docket.parcel.location.history'].sudo() if 'brandix.docket.parcel.location.history' in self.env else None
 
@@ -577,50 +672,70 @@ class BrandixDispatchLocator(models.TransientModel):
 
             # 2. Check if receipts exist with non-empty location_summary
             if not locations:
-                sql_summary = """
+                sum_where = [
+                    "(bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)",
+                    "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))",
+                    "(bcr.id IN (SELECT receipt_id FROM brandix_component_receipt_line WHERE barcode = ANY(%s) OR barcode ILIKE ANY(%s)))"
+                ]
+                sum_params = [comp_type, docket_id, sched_id_list, exact_barcodes, ilike_barcodes]
+                if has_rel_docket and docket_id:
+                    sum_where.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))")
+                    sum_params.append(docket_id)
+                if has_rel_sched and sched_id_list and sched_id_list != [0]:
+                    sum_where.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))")
+                    sum_params.append(sched_id_list)
+
+                sql_summary = f"""
                     SELECT DISTINCT bcr.location_summary
                     FROM brandix_component_receipt bcr
                     WHERE bcr.state = 'validated'
                       AND bcr.component_type = %s
                       AND (
-                          (bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)
-                          OR (bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))
-                          OR (bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))
-                          OR (bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))
-                          OR (bcr.id IN (SELECT receipt_id FROM brandix_component_receipt_line WHERE barcode = ANY(%s) OR barcode ILIKE ANY(%s)))
+                          {' OR '.join(sum_where)}
                       )
                       AND bcr.location_summary IS NOT NULL
                       AND bcr.location_summary != '-'
                 """
-                self.env.cr.execute(sql_summary, (comp_type, docket_id, docket_id, sched_id_list, sched_id_list, exact_barcodes, ilike_barcodes))
-                for srow in self.env.cr.dictfetchall():
-                    has_validated = True
-                    summary = srow.get('location_summary')
-                    if summary:
-                        for p in summary.split(','):
-                            cp = p.strip()
-                            if cp and cp not in locations:
-                                locations.append(cp)
+                with self.env.cr.savepoint():
+                    self.env.cr.execute(sql_summary, tuple(sum_params))
+                    for srow in self.env.cr.dictfetchall():
+                        has_validated = True
+                        summary = srow.get('location_summary')
+                        if summary:
+                            for p in summary.split(','):
+                                cp = p.strip()
+                                if cp and cp not in locations:
+                                    locations.append(cp)
 
             # 3. Check if receipt exists at all
             if not has_validated:
-                sql_check = """
+                chk_where = [
+                    "(bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)",
+                    "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))",
+                    "(bcr.id IN (SELECT receipt_id FROM brandix_component_receipt_line WHERE barcode = ANY(%s) OR barcode ILIKE ANY(%s)))"
+                ]
+                chk_params = [comp_type, docket_id, sched_id_list, exact_barcodes, ilike_barcodes]
+                if has_rel_docket and docket_id:
+                    chk_where.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))")
+                    chk_params.append(docket_id)
+                if has_rel_sched and sched_id_list and sched_id_list != [0]:
+                    chk_where.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))")
+                    chk_params.append(sched_id_list)
+
+                sql_check = f"""
                     SELECT bcr.id
                     FROM brandix_component_receipt bcr
                     WHERE bcr.state = 'validated'
                       AND bcr.component_type = %s
                       AND (
-                          (bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)
-                          OR (bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))
-                          OR (bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))
-                          OR (bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))
-                          OR (bcr.id IN (SELECT receipt_id FROM brandix_component_receipt_line WHERE barcode = ANY(%s) OR barcode ILIKE ANY(%s)))
+                          {' OR '.join(chk_where)}
                       )
                     LIMIT 1
                 """
-                self.env.cr.execute(sql_check, (comp_type, docket_id, docket_id, sched_id_list, sched_id_list, exact_barcodes, ilike_barcodes))
-                if self.env.cr.fetchone():
-                    has_validated = True
+                with self.env.cr.savepoint():
+                    self.env.cr.execute(sql_check, tuple(chk_params))
+                    if self.env.cr.fetchone():
+                        has_validated = True
 
             if locations:
                 location_display = ", ".join(locations)
@@ -664,14 +779,15 @@ class BrandixDispatchLocator(models.TransientModel):
                 # Count component parcels in this location
                 comp_count = 0
                 try:
-                    self.env.cr.execute("""
-                        SELECT COUNT(*) FROM brandix_component_receipt_line bcrl
-                        JOIN brandix_component_receipt bcr ON bcrl.receipt_id = bcr.id
-                        WHERE bcrl.location_id = %s AND bcr.state = 'validated'
-                    """, (loc.id,))
-                    comp_count = self.env.cr.fetchone()[0] or 0
+                    with self.env.cr.savepoint():
+                        self.env.cr.execute("""
+                            SELECT COUNT(*) FROM brandix_component_receipt_line bcrl
+                            JOIN brandix_component_receipt bcr ON bcrl.receipt_id = bcr.id
+                            WHERE bcrl.location_id = %s AND bcr.state = 'validated'
+                        """, (loc.id,))
+                        comp_count = self.env.cr.fetchone()[0] or 0
                 except Exception:
-                    pass
+                    comp_count = 0
 
                 racks.append({
                     'id': loc.id,
