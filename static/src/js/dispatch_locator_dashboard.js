@@ -172,7 +172,7 @@ export class DispatchLocatorDashboard extends Component {
         }
     }
 
-    async openParcelHistory(parcelId, parcelName) {
+    async openParcelHistory(parcelId, parcelName, parcelType = 'cut') {
         this.state.currentHistoryParcelName = parcelName;
         this.state.historyModalOpen = true;
         this.state.parcelHistoryLogs = [];
@@ -180,7 +180,7 @@ export class DispatchLocatorDashboard extends Component {
             const logs = await this.orm.call(
                 "brandix.dispatch.locator",
                 "get_parcel_location_history",
-                [parcelId]
+                [parcelId, parcelType]
             );
             this.state.parcelHistoryLogs = logs;
         } catch (error) {
@@ -194,9 +194,10 @@ export class DispatchLocatorDashboard extends Component {
         this.state.parcelHistoryLogs = [];
     }
 
-    openRelocateModal(parcelId, parcelName, currentLocationId) {
+    openRelocateModal(parcelId, parcelName, currentLocationId, parcelType = 'cut') {
         this.state.relocateParcelId = parcelId;
         this.state.relocateParcelName = parcelName;
+        this.state.relocateParcelType = parcelType;
         this.state.selectedNewLocationId = currentLocationId ? String(currentLocationId) : "";
         this.state.relocateReason = "";
         this.state.relocateModalOpen = true;
@@ -205,6 +206,7 @@ export class DispatchLocatorDashboard extends Component {
     closeRelocateModal() {
         this.state.relocateModalOpen = false;
         this.state.relocateParcelId = null;
+        this.state.relocateParcelType = 'cut';
     }
 
     async confirmRelocate() {
@@ -218,7 +220,7 @@ export class DispatchLocatorDashboard extends Component {
             const res = await this.orm.call(
                 "brandix.dispatch.locator",
                 "reassign_parcel_location",
-                [this.state.relocateParcelId, newLocId, this.state.relocateReason]
+                [this.state.relocateParcelId, newLocId, this.state.relocateReason, this.state.relocateParcelType || 'cut']
             );
             if (res && res.success) {
                 this.notification.add(`Parcel moved to ${res.new_location_name} successfully!`, { type: "success" });

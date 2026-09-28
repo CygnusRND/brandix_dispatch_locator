@@ -7,8 +7,10 @@
         <field name="arch" type="xml">
             <list string="Parcel Location Audit Trail" create="false" edit="false" delete="false">
                 <field name="change_date"/>
+                <field name="parcel_type"/>
                 <field name="parcel_name"/>
                 <field name="docket_id"/>
+                <field name="component_receipt_id"/>
                 <field name="picking_id"/>
                 <field name="old_location_name"/>
                 <field name="new_location_name"/>
@@ -43,9 +45,12 @@
                         </group>
                     </group>
                     <group string="Associated Records">
+                        <field name="parcel_type" readonly="1"/>
                         <field name="docket_id" readonly="1"/>
+                        <field name="component_receipt_id" readonly="1"/>
                         <field name="picking_id" readonly="1"/>
                         <field name="parcel_location_id" readonly="1"/>
+                        <field name="component_receipt_line_id" readonly="1"/>
                     </group>
                 </sheet>
             </form>

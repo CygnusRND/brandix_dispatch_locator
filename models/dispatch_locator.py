@@ -512,10 +512,12 @@ class BrandixDispatchLocator(models.TransientModel):
 
             sql = """
                 SELECT DISTINCT
+                    sl.id as location_id,
                     sl.name as location_name,
                     sl.complete_name as location_complete_name,
                     bcr.id as receipt_id,
                     bcr.name as receipt_name,
+                    bcrl.id as line_id,
                     bcrl.parcel_no,
                     bcrl.barcode
                 FROM brandix_component_receipt_line bcrl
@@ -552,16 +554,25 @@ class BrandixDispatchLocator(models.TransientModel):
             self.env.cr.execute(sql, params)
             rows = self.env.cr.dictfetchall()
 
+            History = self.env['brandix.docket.parcel.location.history'].sudo() if 'brandix.docket.parcel.location.history' in self.env else None
+
             for r in rows:
                 has_validated = True
                 loc = r.get('location_name') or r.get('location_complete_name')
                 if loc and loc not in locations:
                     locations.append(loc)
+                line_id = r.get('line_id')
+                hist_count = History.search_count([('component_receipt_line_id', '=', line_id)]) if (History and line_id) else 0
                 parcels_info.append({
-                    'parcel_no': r.get('parcel_no'),
-                    'location_name': r.get('location_name'),
-                    'location_full_name': r.get('location_complete_name'),
+                    'id': line_id,
+                    'parcel_number': r.get('parcel_no'),
+                    'parcel_name': f"{'Trims' if comp_type == 'trim' else 'EMB'} Parcel #{r.get('parcel_no')}",
+                    'location_id': r.get('location_id'),
+                    'location_name': r.get('location_name') or 'UNASSIGNED',
+                    'location_full_name': r.get('location_complete_name') or 'Not Placed Yet',
                     'receipt_name': r.get('receipt_name'),
+                    'comp_type': comp_type,
+                    'history_count': hist_count,
                 })
 
             # 2. Check if receipts exist with non-empty location_summary
@@ -677,13 +688,16 @@ class BrandixDispatchLocator(models.TransientModel):
             return []
 
     @api.model
-    def get_parcel_location_history(self, parcel_location_id):
-        """Returns the full audit trail of location movements for a parcel"""
+    def get_parcel_location_history(self, parcel_location_id, parcel_type='cut'):
+        """Returns the full audit trail of location movements for a parcel (cut, trim, or emb)"""
         try:
             History = self.env['brandix.docket.parcel.location.history'].sudo()
-            logs = History.search([
-                ('parcel_location_id', '=', int(parcel_location_id))
-            ], order='change_date desc, id desc')
+            if parcel_type in ('trim', 'emb'):
+                domain = [('component_receipt_line_id', '=', int(parcel_location_id))]
+            else:
+                domain = [('parcel_location_id', '=', int(parcel_location_id))]
+
+            logs = History.search(domain, order='change_date desc, id desc')
 
             return [{
                 'id': h.id,
@@ -699,22 +713,42 @@ class BrandixDispatchLocator(models.TransientModel):
             return []
 
     @api.model
-    def reassign_parcel_location(self, parcel_location_id, new_location_id, reason="Manual Smart Board Reassignment"):
-        """Directly relocates a parcel from the Smart Board and logs audit trail"""
+    def reassign_parcel_location(self, parcel_location_id, new_location_id, reason="Manual Smart Board Reassignment", parcel_type='cut'):
+        """Directly relocates a parcel (cut, trim, or emb) from the Smart Board and logs audit trail"""
         try:
-            ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
-            parcel = ParcelLoc.browse(int(parcel_location_id))
-            if not parcel.exists():
-                return {'success': False, 'message': 'Parcel not found'}
+            Location = self.env['stock.location'].sudo()
+            target_loc = Location.browse(int(new_location_id))
+            if not target_loc.exists():
+                return {'success': False, 'message': 'Target Location not found'}
 
-            parcel.with_context(location_change_reason=reason).write({
-                'location_dest_id': int(new_location_id)
-            })
+            if parcel_type in ('trim', 'emb'):
+                CompLine = self.env['brandix.component.receipt.line'].sudo()
+                parcel = CompLine.browse(int(parcel_location_id))
+                if not parcel.exists():
+                    return {'success': False, 'message': 'Component parcel not found'}
+
+                parcel.with_context(location_change_reason=reason).write({
+                    'location_id': int(new_location_id)
+                })
+                new_name = parcel.location_id.name
+                new_full_name = parcel.location_id.complete_name
+            else:
+                ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
+                parcel = ParcelLoc.browse(int(parcel_location_id))
+                if not parcel.exists():
+                    return {'success': False, 'message': 'Parcel not found'}
+
+                parcel.with_context(location_change_reason=reason).write({
+                    'location_dest_id': int(new_location_id)
+                })
+                new_name = parcel.location_dest_id.name
+                new_full_name = parcel.location_dest_id.complete_name
 
             return {
                 'success': True,
-                'location_name': parcel.location_dest_id.name,
-                'location_full_name': parcel.location_dest_id.complete_name
+                'new_location_name': new_name,
+                'location_name': new_name,
+                'location_full_name': new_full_name
             }
         except Exception as e:
             _logger.exception("Error in reassign_parcel_location: %s", str(e))
