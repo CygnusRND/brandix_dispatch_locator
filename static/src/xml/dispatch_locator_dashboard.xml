@@ -297,6 +297,15 @@
                                             <span class="text-muted fw-semibold">Storage Bin / Rack:</span>
                                             <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.trims.location_name"></span>
                                         </div>
+                                        <t t-if="res.trims.parcels and res.trims.parcels.length > 0">
+                                            <div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">
+                                                <t t-foreach="res.trims.parcels" t-as="tp" t-key="tp.parcel_no">
+                                                    <span class="badge bg-primary-subtle text-primary border font-monospace px-2 py-1">
+                                                        P#<t t-esc="tp.parcel_no"/>: <strong t-esc="tp.location_name"/>
+                                                    </span>
+                                                </t>
+                                            </div>
+                                        </t>
                                     </div>
                                 </div>
                             </div>
@@ -335,6 +344,15 @@
                                                 <span class="text-muted fw-semibold">EMB Storage Rack / Bin:</span>
                                                 <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.emb.location_name"></span>
                                             </div>
+                                            <t t-if="res.emb.parcels and res.emb.parcels.length > 0">
+                                                <div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">
+                                                    <t t-foreach="res.emb.parcels" t-as="ep" t-key="ep.parcel_no">
+                                                        <span class="badge bg-primary-subtle text-primary border font-monospace px-2 py-1">
+                                                            P#<t t-esc="ep.parcel_no"/>: <strong t-esc="ep.location_name"/>
+                                                        </span>
+                                                    </t>
+                                                </div>
+                                            </t>
                                         </t>
                                     </div>
                                 </div>
@@ -373,15 +391,17 @@
                                         <span class="fs-3 fw-black text-success" t-esc="sres.schedule.co_qty"></span>
                                     </div>
                                     <div class="col-md-2 border-end">
-                                        <span class="text-muted small fw-bold d-block text-uppercase">Trims Status</span>
-                                        <span class="badge fs-5 px-3 py-2 rounded-3"
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Trims Status &amp; Rack</span>
+                                        <span class="badge fs-5 px-3 py-2 rounded-3 mb-1"
                                               t-att-class="sres.schedule.trims_status === 'issued' ? 'bg-success' : 'bg-warning text-dark'">
                                             <t t-esc="sres.schedule.trims_status"/>
                                         </span>
+                                        <div class="small fw-bold text-dark font-monospace text-truncate" t-esc="sres.schedule.trims_location"></div>
                                     </div>
                                     <div class="col-md-2">
-                                        <span class="text-muted small fw-bold d-block text-uppercase">EMB Pool Balance</span>
-                                        <span class="fs-3 fw-black text-primary" t-esc="sres.schedule.emb_pool_balance"></span>
+                                        <span class="text-muted small fw-bold d-block text-uppercase">EMB Pool &amp; Rack</span>
+                                        <span class="fs-3 fw-black text-primary d-block" t-esc="sres.schedule.emb_pool_balance"></span>
+                                        <div class="small fw-bold text-dark font-monospace text-truncate" t-esc="sres.schedule.emb_location"></div>
                                     </div>
                                 </div>
                             </div>
