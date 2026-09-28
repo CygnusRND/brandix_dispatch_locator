@@ -831,23 +831,25 @@ class BrandixDispatchLocator(models.TransientModel):
                 ('picking_id.state', '!=', 'cancel'),
                 '|', ('picking_id.docket_id', '=', docket.id), ('picking_id.job_number', '=ilike', docket_name)
             ])
-            for cp in cut_parcels:
-                old_loc = cp.location_dest_id
-                History.create({
-                    'parcel_location_id': cp.id,
-                    'parcel_type': 'cut',
-                    'parcel_number': cp.parcel_number,
-                    'parcel_name': cp.parcel_name or f"Parcel #{cp.parcel_number}",
-                    'docket_id': docket.id,
-                    'old_location_id': old_loc.id,
-                    'new_location_id': False,
-                    'old_location_name': old_loc.display_name,
-                    'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
-                    'user_id': self.env.user.id,
-                    'change_date': fields.Datetime.now(),
-                    'notes': f"Issued to Production Line with Docket {docket_name}"
-                })
-                cp.with_context(skip_history_create=True).write({'location_dest_id': False})
+            if cut_parcels:
+                for cp in cut_parcels:
+                    old_loc = cp.location_dest_id
+                    History.create({
+                        'parcel_location_id': cp.id,
+                        'parcel_type': 'cut',
+                        'parcel_number': cp.parcel_number,
+                        'parcel_name': cp.parcel_name or f"Parcel #{cp.parcel_number}",
+                        'docket_id': docket.id,
+                        'old_location_id': old_loc.id,
+                        'new_location_id': False,
+                        'old_location_name': old_loc.display_name,
+                        'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
+                        'user_id': self.env.user.id,
+                        'change_date': fields.Datetime.now(),
+                        'notes': f"Issued to Production Line with Docket {docket_name}"
+                    })
+                self.env.cr.execute("UPDATE brandix_docket_parcel_location SET location_dest_id = NULL WHERE id IN %s", (tuple(cut_parcels.ids),))
+                ParcelLoc.invalidate_model(['location_dest_id'])
 
         # 2. Trims Parcels (if carrier docket or schedule trims status is issued)
         if CompLine and History:
@@ -865,29 +867,26 @@ class BrandixDispatchLocator(models.TransientModel):
                         ('location_id', '!=', False),
                         '|', ('receipt_id.schedule_master_id', '=', sched.id), ('receipt_id.schedule_master_id.name', '=ilike', sched.name)
                     ])
-                    for tl in trim_lines:
-                        old_loc = tl.location_id
-                        rec_name = tl.receipt_id.name if tl.receipt_id else ''
-                        History.create({
-                            'component_receipt_line_id': tl.id,
-                            'parcel_type': 'trim',
-                            'parcel_number': tl.parcel_no,
-                            'parcel_name': f"Trims Parcel #{tl.parcel_no} ({rec_name})",
-                            'docket_id': docket.id,
-                            'old_location_id': old_loc.id,
-                            'new_location_id': False,
-                            'old_location_name': old_loc.display_name,
-                            'new_location_name': f"OUT - Issued to Production Line (Module: {module_name}, Carrier Docket: {docket_name})",
-                            'user_id': self.env.user.id,
-                            'change_date': fields.Datetime.now(),
-                            'notes': f"Dispatched to Line with Carrier Docket {docket_name}"
-                        })
-                        tl.with_context(skip_history_create=True).write({'location_id': False})
-                        if tl.receipt_id:
-                            try:
-                                tl.receipt_id.write({'location_summary': 'Issued to Line'})
-                            except Exception:
-                                pass
+                    if trim_lines:
+                        for tl in trim_lines:
+                            old_loc = tl.location_id
+                            rec_name = tl.receipt_id.name if tl.receipt_id else ''
+                            History.create({
+                                'component_receipt_line_id': tl.id,
+                                'parcel_type': 'trim',
+                                'parcel_number': tl.parcel_no,
+                                'parcel_name': f"Trims Parcel #{tl.parcel_no} ({rec_name})",
+                                'docket_id': docket.id,
+                                'old_location_id': old_loc.id,
+                                'new_location_id': False,
+                                'old_location_name': old_loc.display_name,
+                                'new_location_name': f"OUT - Issued to Production Line (Module: {module_name}, Carrier Docket: {docket_name})",
+                                'user_id': self.env.user.id,
+                                'change_date': fields.Datetime.now(),
+                                'notes': f"Dispatched to Line with Carrier Docket {docket_name}"
+                            })
+                        self.env.cr.execute("UPDATE brandix_component_receipt_line SET location_id = NULL WHERE id IN %s", (tuple(trim_lines.ids),))
+                        CompLine.invalidate_model(['location_id'])
 
         # 3. Docket-wise Embellishment (EMB)
         if CompLine and History:
@@ -897,29 +896,26 @@ class BrandixDispatchLocator(models.TransientModel):
                 ('location_id', '!=', False),
                 '|', ('receipt_id.docket_id', '=', docket.id), ('barcode', '=ilike', f"%{docket_name}%")
             ])
-            for el in emb_lines:
-                old_loc = el.location_id
-                rec_name = el.receipt_id.name if el.receipt_id else ''
-                History.create({
-                    'component_receipt_line_id': el.id,
-                    'parcel_type': 'emb',
-                    'parcel_number': el.parcel_no,
-                    'parcel_name': f"EMB Parcel #{el.parcel_no} ({rec_name})",
-                    'docket_id': docket.id,
-                    'old_location_id': old_loc.id,
-                    'new_location_id': False,
-                    'old_location_name': old_loc.display_name,
-                    'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
-                    'user_id': self.env.user.id,
-                    'change_date': fields.Datetime.now(),
-                    'notes': f"Issued to Production Line with Docket {docket_name}"
-                })
-                el.with_context(skip_history_create=True).write({'location_id': False})
-                if el.receipt_id:
-                    try:
-                        el.receipt_id.write({'location_summary': 'Issued to Line'})
-                    except Exception:
-                        pass
+            if emb_lines:
+                for el in emb_lines:
+                    old_loc = el.location_id
+                    rec_name = el.receipt_id.name if el.receipt_id else ''
+                    History.create({
+                        'component_receipt_line_id': el.id,
+                        'parcel_type': 'emb',
+                        'parcel_number': el.parcel_no,
+                        'parcel_name': f"EMB Parcel #{el.parcel_no} ({rec_name})",
+                        'docket_id': docket.id,
+                        'old_location_id': old_loc.id,
+                        'new_location_id': False,
+                        'old_location_name': old_loc.display_name,
+                        'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
+                        'user_id': self.env.user.id,
+                        'change_date': fields.Datetime.now(),
+                        'notes': f"Issued to Production Line with Docket {docket_name}"
+                    })
+                self.env.cr.execute("UPDATE brandix_component_receipt_line SET location_id = NULL WHERE id IN %s", (tuple(emb_lines.ids),))
+                CompLine.invalidate_model(['location_id'])
 
     @api.model
     def clean_completed_dockets_locations(self):

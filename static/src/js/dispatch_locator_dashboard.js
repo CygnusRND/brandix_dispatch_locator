@@ -40,6 +40,7 @@ export class DispatchLocatorDashboard extends Component {
         this.clockTimer = null;
         this.autoRefreshTimer = null;
         this.inactivityTimer = null;
+        this.syncInProgress = false;
         this.INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes (120,000 ms)
 
         this.boundHandleActivity = this.handleUserActivity.bind(this);
@@ -81,10 +82,10 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     startAutoRefresh() {
-        // Automatically re-syncs active view every 15 seconds without browser refresh
+        // Automatically re-syncs active view every 30 seconds when tab is visible
         this.autoRefreshTimer = setInterval(() => {
             this.autoSyncDashboard();
-        }, 15000);
+        }, 30000);
     }
 
     stopAutoRefresh() {
@@ -95,11 +96,15 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     async autoSyncDashboard() {
-        // Do not auto-sync if modals are actively open
-        if (this.state.historyModalOpen || this.state.relocateModalOpen) {
+        // Do not auto-sync if page is hidden in background, previous sync is in progress, or modals open
+        if (typeof document !== 'undefined' && document.hidden) {
+            return;
+        }
+        if (this.syncInProgress || this.state.historyModalOpen || this.state.relocateModalOpen) {
             return;
         }
 
+        this.syncInProgress = true;
         try {
             if (this.state.searchTerm.trim() && this.state.searchResult) {
                 // Background refresh of search data without triggering loading spinner
@@ -120,6 +125,8 @@ export class DispatchLocatorDashboard extends Component {
             this.state.lastSyncedTime = this.formatTime(new Date());
         } catch (error) {
             console.warn("Background auto-sync skipped:", error);
+        } finally {
+            this.syncInProgress = false;
         }
     }
 
