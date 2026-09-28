@@ -154,15 +154,22 @@ class BrandixDispatchLocator(models.TransientModel):
 
         # Search Trims physical location in warehouse if in store
         trims_location = 'Not Assigned'
-        if sched:
-            trims_pick = self.env['stock.picking'].sudo().search([
-                ('is_component_receipt', '=', True),
-                ('style_type', '=', 'trims'),
-                ('schedule_master_id', '=', sched.id),
-                ('state', '!=', 'cancel')
-            ], limit=1)
-            if trims_pick and trims_pick.destination_bin_id:
-                trims_location = trims_pick.destination_bin_id.name
+        if 'brandix.component.receipt' in self.env:
+            CompReceipt = self.env['brandix.component.receipt'].sudo()
+            domain = [('component_type', '=', 'trim'), ('state', '!=', 'cancelled')]
+            match_domain = ['|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
+            if sched:
+                match_domain = ['|', '|', '|',
+                    ('docket_id', '=', docket.id),
+                    ('docket_ids', 'in', [docket.id]),
+                    ('schedule_master_id', '=', sched.id),
+                    ('schedule_master_ids', 'in', [sched.id])
+                ]
+            trims_rec = CompReceipt.search(domain + match_domain, limit=1)
+            if trims_rec:
+                trims_location = trims_rec.location_summary or 'In Store'
+                if trims_location == '-':
+                    trims_location = 'In Store'
 
         trims_info = {
             'status': trims_status,
@@ -182,15 +189,22 @@ class BrandixDispatchLocator(models.TransientModel):
 
         # Find EMB Physical Rack/Bin
         emb_location = 'Not Assigned'
-        if is_emb and sched:
-            emb_pick = self.env['stock.picking'].sudo().search([
-                ('is_component_receipt', '=', True),
-                ('style_type', '=', 'emb'),
-                ('schedule_master_id', '=', sched.id),
-                ('state', '!=', 'cancel')
-            ], limit=1)
-            if emb_pick and emb_pick.destination_bin_id:
-                emb_location = emb_pick.destination_bin_id.name
+        if is_emb and 'brandix.component.receipt' in self.env:
+            CompReceipt = self.env['brandix.component.receipt'].sudo()
+            domain = [('component_type', '=', 'emb'), ('state', '!=', 'cancelled')]
+            match_domain = ['|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
+            if sched:
+                match_domain = ['|', '|', '|',
+                    ('docket_id', '=', docket.id),
+                    ('docket_ids', 'in', [docket.id]),
+                    ('schedule_master_id', '=', sched.id),
+                    ('schedule_master_ids', 'in', [sched.id])
+                ]
+            emb_rec = CompReceipt.search(domain + match_domain, limit=1)
+            if emb_rec:
+                emb_location = emb_rec.location_summary or 'In Store'
+                if emb_location == '-':
+                    emb_location = 'In Store'
 
         emb_info = {
             'is_emb_style': is_emb,
