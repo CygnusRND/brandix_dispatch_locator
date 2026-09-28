@@ -4,7 +4,7 @@ import logging
 
 _logger = logging.getLogger(__name__)
 
-class BrandixDispatchLocator(models.AbstractModel):
+class BrandixDispatchLocator(models.TransientModel):
     _name = 'brandix.dispatch.locator'
     _description = 'Dispatch & Locator Dashboard Service'
 
@@ -12,70 +12,89 @@ class BrandixDispatchLocator(models.AbstractModel):
     def search_dispatch_data(self, search_term):
         """
         Unified Smart Search for Smart Board Dashboard:
-        Searches by Docket Number, Schedule Number, or Location/Rack name.
+        Searches by Docket Number, Schedule Number, Style Code, or Location/Rack name.
         Returns comprehensive real-time status and physical locations.
         """
-        if not search_term or not str(search_term).strip():
-            return {'status': 'empty'}
+        try:
+            if not search_term or not str(search_term).strip():
+                return {'status': 'empty'}
 
-        term = str(search_term).strip()
-        clean_term = term.upper()
-        if ':' in clean_term:
-            job_core = clean_term.split(':')[-1].strip()
-        else:
-            job_core = clean_term
+            term = str(search_term).strip()
+            clean_term = term.upper()
+            if ':' in clean_term:
+                job_core = clean_term.split(':')[-1].strip()
+            else:
+                job_core = clean_term
 
-        ProductTemplate = self.env['product.template']
-        ScheduleMaster = self.env['brandix.schedule.master'] if 'brandix.schedule.master' in self.env else None
-        StockLocation = self.env['stock.location']
-        ParcelLocation = self.env['brandix.docket.parcel.location']
+            ProductTemplate = self.env['product.template'].sudo()
+            ScheduleMaster = self.env['brandix.schedule.master'].sudo() if 'brandix.schedule.master' in self.env else None
+            StockLocation = self.env['stock.location'].sudo()
 
-        # 1. First Priority: Check if search matches a Docket Master
-        docket = ProductTemplate.search([
-            ('is_docket', '=', True),
-            ('active', '=', True),
-            '|', '|',
-            ('name', '=ilike', clean_term),
-            ('name', '=ilike', f"%{job_core}%"),
-            ('docket_number', '=ilike', clean_term)
-        ], limit=1)
-
-        if docket:
-            return self._build_docket_details(docket)
-
-        # 2. Second Priority: Check if search matches a Schedule Number
-        sched_recs = ScheduleMaster.search([
-            ('name', '=ilike', clean_term)
-        ], limit=1) if ScheduleMaster else None
-
-        if not sched_recs:
-            # Check if any docket has this schedule_no
-            matching_dockets = ProductTemplate.search([
+            # 1. First Priority: Check if search matches a Docket Master
+            docket = ProductTemplate.search([
                 ('is_docket', '=', True),
                 ('active', '=', True),
-                ('schedule_no', '=ilike', f"%{clean_term}%")
-            ])
-            if matching_dockets:
-                return self._build_schedule_details_from_dockets(clean_term, matching_dockets)
-        else:
-            return self._build_schedule_details(sched_recs[0])
+                '|', '|',
+                ('name', '=ilike', clean_term),
+                ('name', '=ilike', f"%{job_core}%"),
+                ('docket_number', '=ilike', clean_term)
+            ], limit=1)
 
-        # 3. Third Priority: Check if search matches a Location (Rack / Bin)
-        location = StockLocation.search([
-            ('usage', '=', 'internal'),
-            '|',
-            ('name', '=ilike', clean_term),
-            ('complete_name', '=ilike', f"%{clean_term}%")
-        ], limit=1)
+            if docket:
+                return self._build_docket_details(docket)
 
-        if location:
-            return self._build_location_details(location)
+            # 2. Second Priority: Check if search matches a Schedule Number
+            sched_recs = ScheduleMaster.search([
+                ('name', '=ilike', clean_term)
+            ], limit=1) if ScheduleMaster else None
 
-        return {
-            'status': 'not_found',
-            'search_term': term,
-            'message': _("No Docket, Schedule, or Rack found matching '%s'") % term
-        }
+            if not sched_recs:
+                matching_dockets = ProductTemplate.search([
+                    ('is_docket', '=', True),
+                    ('active', '=', True),
+                    ('schedule_no', '=ilike', f"%{clean_term}%")
+                ])
+                if matching_dockets:
+                    return self._build_schedule_details_from_dockets(clean_term, matching_dockets)
+            else:
+                return self._build_schedule_details(sched_recs[0])
+
+            # 3. Third Priority: Check if search matches a Style Code
+            style_dockets = ProductTemplate.search([
+                ('is_docket', '=', True),
+                ('active', '=', True),
+                '|',
+                ('style_code', '=ilike', clean_term),
+                ('style_code', '=ilike', f"%{clean_term}%")
+            ], order='id asc')
+
+            if style_dockets:
+                return self._build_schedule_details_from_dockets(f"Style: {clean_term}", style_dockets)
+
+            # 4. Fourth Priority: Check if search matches a Location (Rack / Bin)
+            location = StockLocation.search([
+                ('usage', '=', 'internal'),
+                '|', '|',
+                ('name', '=ilike', clean_term),
+                ('name', '=ilike', f"%{clean_term}%"),
+                ('complete_name', '=ilike', f"%{clean_term}%")
+            ], limit=1)
+
+            if location:
+                return self._build_location_details(location)
+
+            return {
+                'status': 'not_found',
+                'search_term': term,
+                'message': _("No Docket, Schedule, Style, or Rack found matching '%s'") % term
+            }
+        except Exception as e:
+            _logger.exception("Error executing dispatch locator search for '%s': %s", search_term, str(e))
+            return {
+                'status': 'not_found',
+                'search_term': str(search_term),
+                'message': _("Error searching for '%s': %s") % (search_term, str(e))
+            }
 
     @api.model
     def _build_docket_details(self, docket):
@@ -86,7 +105,7 @@ class BrandixDispatchLocator(models.AbstractModel):
         sched = docket.schedule_master_ids[:1] or docket.schedule_master_id
         if not sched and docket.schedule_no and 'brandix.schedule.master' in self.env:
             sched_names = [s.strip() for s in str(docket.schedule_no).replace(';', ',').split(',') if s.strip()]
-            sched = self.env['brandix.schedule.master'].search([('name', 'in', sched_names)], limit=1)
+            sched = self.env['brandix.schedule.master'].sudo().search([('name', 'in', sched_names)], limit=1)
 
         # 1. Job Information
         job_info = {
@@ -106,13 +125,11 @@ class BrandixDispatchLocator(models.AbstractModel):
 
         # 2. Panel Cut Parcels & Their Physical Racks
         parcels_data = []
-        grn_pickings = docket.docket_grn_ids.filtered(lambda p: p.state != 'cancel')
-        if not grn_pickings:
-            grn_pickings = self.env['stock.picking'].search([
-                ('is_docket_grn', '=', True),
-                ('state', '!=', 'cancel'),
-                '|', ('docket_id', '=', docket.id), ('job_number', '=ilike', docket.name)
-            ])
+        grn_pickings = self.env['stock.picking'].sudo().search([
+            ('is_docket_grn', '=', True),
+            ('state', '!=', 'cancel'),
+            '|', ('docket_id', '=', docket.id), ('job_number', '=ilike', docket.name)
+        ])
 
         for grn in grn_pickings:
             for p_loc in grn.parcel_location_ids:
@@ -138,7 +155,7 @@ class BrandixDispatchLocator(models.AbstractModel):
         # Search Trims physical location in warehouse if in store
         trims_location = 'Not Assigned'
         if sched:
-            trims_pick = self.env['stock.picking'].search([
+            trims_pick = self.env['stock.picking'].sudo().search([
                 ('is_component_receipt', '=', True),
                 ('style_type', '=', 'trims'),
                 ('schedule_master_id', '=', sched.id),
@@ -166,7 +183,7 @@ class BrandixDispatchLocator(models.AbstractModel):
         # Find EMB Physical Rack/Bin
         emb_location = 'Not Assigned'
         if is_emb and sched:
-            emb_pick = self.env['stock.picking'].search([
+            emb_pick = self.env['stock.picking'].sudo().search([
                 ('is_component_receipt', '=', True),
                 ('style_type', '=', 'emb'),
                 ('schedule_master_id', '=', sched.id),
@@ -236,7 +253,7 @@ class BrandixDispatchLocator(models.AbstractModel):
     def _build_schedule_details(self, sched):
         """Constructs full schedule-wise multi-docket payload"""
         sched.ensure_one()
-        ProductTemplate = self.env['product.template']
+        ProductTemplate = self.env['product.template'].sudo()
 
         dockets = ProductTemplate.search([
             ('is_docket', '=', True),
@@ -335,7 +352,7 @@ class BrandixDispatchLocator(models.AbstractModel):
     def _build_location_details(self, location):
         """Returns all items currently stored in a given Rack/Bin location"""
         location.ensure_one()
-        ParcelLoc = self.env['brandix.docket.parcel.location']
+        ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
 
         parcel_recs = ParcelLoc.search([
             ('location_dest_id', '=', location.id)
@@ -374,68 +391,79 @@ class BrandixDispatchLocator(models.AbstractModel):
     @api.model
     def get_warehouse_racks_overview(self):
         """Fetches all warehouse internal racks/bins with real-time parcel counts"""
-        StockLocation = self.env['stock.location']
-        ParcelLoc = self.env['brandix.docket.parcel.location']
+        try:
+            StockLocation = self.env['stock.location'].sudo()
+            ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
 
-        locations = StockLocation.search([
-            ('usage', '=', 'internal'),
-            ('location_id', '!=', False)
-        ], order='name asc')
+            locations = StockLocation.search([
+                ('usage', '=', 'internal'),
+                ('location_id', '!=', False)
+            ], order='name asc')
 
-        racks = []
-        for loc in locations:
-            # Count parcels currently assigned to this rack
-            count = ParcelLoc.search_count([
-                ('location_dest_id', '=', loc.id),
-                ('picking_id.state', 'not in', ('done', 'cancel'))
-            ])
-            done_count = ParcelLoc.search_count([
-                ('location_dest_id', '=', loc.id),
-                ('picking_id.state', '=', 'done')
-            ])
-            racks.append({
-                'id': loc.id,
-                'name': loc.name,
-                'complete_name': loc.complete_name,
-                'active_parcel_count': count,
-                'done_parcel_count': done_count,
-                'total_count': count + done_count
-            })
+            racks = []
+            for loc in locations:
+                count = ParcelLoc.search_count([
+                    ('location_dest_id', '=', loc.id),
+                    ('picking_id.state', 'not in', ('done', 'cancel'))
+                ])
+                done_count = ParcelLoc.search_count([
+                    ('location_dest_id', '=', loc.id),
+                    ('picking_id.state', '=', 'done')
+                ])
+                racks.append({
+                    'id': loc.id,
+                    'name': loc.name,
+                    'complete_name': loc.complete_name,
+                    'active_parcel_count': count,
+                    'done_parcel_count': done_count,
+                    'total_count': count + done_count
+                })
 
-        return racks
+            return racks
+        except Exception as e:
+            _logger.exception("Error in get_warehouse_racks_overview: %s", str(e))
+            return []
 
     @api.model
     def get_parcel_location_history(self, parcel_location_id):
         """Returns the full audit trail of location movements for a parcel"""
-        History = self.env['brandix.docket.parcel.location.history']
-        logs = History.search([
-            ('parcel_location_id', '=', int(parcel_location_id))
-        ], order='change_date desc, id desc')
+        try:
+            History = self.env['brandix.docket.parcel.location.history'].sudo()
+            logs = History.search([
+                ('parcel_location_id', '=', int(parcel_location_id))
+            ], order='change_date desc, id desc')
 
-        return [{
-            'id': h.id,
-            'parcel_name': h.parcel_name,
-            'old_location': h.old_location_name or 'Unassigned',
-            'new_location': h.new_location_name or 'Unassigned',
-            'user_name': h.user_id.name if h.user_id else 'System',
-            'change_date': fields.Datetime.to_string(h.change_date),
-            'notes': h.notes or ''
-        } for h in logs]
+            return [{
+                'id': h.id,
+                'parcel_name': h.parcel_name,
+                'old_location': h.old_location_name or 'Unassigned',
+                'new_location': h.new_location_name or 'Unassigned',
+                'user_name': h.user_id.name if h.user_id else 'System',
+                'change_date': fields.Datetime.to_string(h.change_date),
+                'notes': h.notes or ''
+            } for h in logs]
+        except Exception as e:
+            _logger.exception("Error in get_parcel_location_history: %s", str(e))
+            return []
 
     @api.model
     def reassign_parcel_location(self, parcel_location_id, new_location_id, reason="Manual Smart Board Reassignment"):
         """Directly relocates a parcel from the Smart Board and logs audit trail"""
-        ParcelLoc = self.env['brandix.docket.parcel.location']
-        parcel = ParcelLoc.browse(int(parcel_location_id))
-        if not parcel.exists():
-            return {'success': False, 'message': 'Parcel not found'}
+        try:
+            ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
+            parcel = ParcelLoc.browse(int(parcel_location_id))
+            if not parcel.exists():
+                return {'success': False, 'message': 'Parcel not found'}
 
-        parcel.with_context(location_change_reason=reason).write({
-            'location_dest_id': int(new_location_id)
-        })
+            parcel.with_context(location_change_reason=reason).write({
+                'location_dest_id': int(new_location_id)
+            })
 
-        return {
-            'success': True,
-            'location_name': parcel.location_dest_id.name,
-            'location_full_name': parcel.location_dest_id.complete_name
-        }
+            return {
+                'success': True,
+                'location_name': parcel.location_dest_id.name,
+                'location_full_name': parcel.location_dest_id.complete_name
+            }
+        except Exception as e:
+            _logger.exception("Error in reassign_parcel_location: %s", str(e))
+            return {'success': False, 'message': str(e)}
