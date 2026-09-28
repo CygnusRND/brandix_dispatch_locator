@@ -311,8 +311,66 @@
                                             <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.trims.location_name"></span>
                                         </div>
 
-                                        <!-- TRIMS PARCEL RACK BOXES -->
-                                        <t t-if="res.trims.parcels and res.trims.parcels.length > 0">
+                                        <!-- TRIMS PARCEL RACK BOXES (GROUPED BY ARRIVAL OCCASION) -->
+                                        <t t-if="res.trims.receipt_groups and res.trims.receipt_groups.length > 0">
+                                            <div class="mt-3 pt-3 border-top">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <span class="text-muted small fw-bold text-uppercase">
+                                                        <i class="fa fa-cubes me-1 text-primary"></i> Trims Storage by Arrival Batch:
+                                                    </span>
+                                                    <span class="badge bg-light text-dark border small fw-bold">
+                                                        <t t-esc="res.trims.receipt_groups.length"/> Arrival<t t-if="res.trims.receipt_groups.length > 1">s</t>
+                                                    </span>
+                                                </div>
+                                                <div class="d-flex flex-column gap-3">
+                                                    <t t-foreach="res.trims.receipt_groups" t-as="group" t-key="group.receipt_id">
+                                                        <div class="border rounded-4 p-3 bg-light shadow-sm">
+                                                            <div class="d-flex justify-content-between align-items-center pb-2 mb-2 border-bottom flex-wrap gap-2">
+                                                                <div class="d-flex align-items-center gap-2">
+                                                                    <span class="badge bg-dark text-white font-monospace fs-6 px-3 py-1">
+                                                                        <i class="fa fa-file-text-o me-1 text-warning"></i> <t t-esc="group.receipt_name"/>
+                                                                    </span>
+                                                                    <span class="small text-muted" t-if="group.received_date">
+                                                                        <i class="fa fa-calendar me-1"></i> <t t-esc="group.received_date"/>
+                                                                    </span>
+                                                                </div>
+                                                                <span class="badge bg-success-subtle text-success fs-6 fw-bold px-3 py-1" t-if="group.received_qty">
+                                                                    Batch Qty: <t t-esc="group.received_qty"/> pcs
+                                                                </span>
+                                                            </div>
+                                                            <div class="row g-2">
+                                                                <t t-foreach="group.parcels" t-as="tp" t-key="tp.id">
+                                                                    <div class="col-12">
+                                                                        <div class="parcel-rack-box p-3 rounded-4 shadow-sm border-2 bg-white text-center">
+                                                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                                <span class="badge bg-primary-subtle text-primary fs-6 px-3 py-1 rounded-pill fw-bold" t-esc="tp.parcel_name"></span>
+                                                                                <span class="small text-muted font-monospace" t-esc="group.receipt_name"></span>
+                                                                            </div>
+                                                                            <div class="my-2">
+                                                                                <div class="rack-title fs-2 fw-black text-primary font-monospace py-2 px-3 bg-light rounded-3 border"
+                                                                                     t-esc="tp.location_name"></div>
+                                                                                <div class="text-muted small mt-1" t-esc="tp.location_full_name"></div>
+                                                                            </div>
+                                                                            <div class="d-flex justify-content-between align-items-center pt-2 border-top mt-2">
+                                                                                <button class="btn btn-sm btn-outline-info rounded-pill px-3"
+                                                                                        t-on-click="() => this.openParcelHistory(tp.id, tp.parcel_name, 'trim')">
+                                                                                    <i class="fa fa-history me-1"></i> Movement Log (<t t-esc="tp.history_count"/>)
+                                                                                </button>
+                                                                                <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                                                        t-on-click="() => this.openRelocateModal(tp.id, tp.parcel_name, tp.location_id, 'trim')">
+                                                                                    <i class="fa fa-arrows me-1"></i> Move Rack
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </t>
+                                                            </div>
+                                                        </div>
+                                                    </t>
+                                                </div>
+                                            </div>
+                                        </t>
+                                        <t t-elif="res.trims.parcels and res.trims.parcels.length > 0">
                                             <div class="mt-3 pt-3 border-top">
                                                 <div class="text-muted small fw-bold text-uppercase mb-2">
                                                     <i class="fa fa-cubes me-1"></i> Trims Parcel Physical Storage:
@@ -450,8 +508,66 @@
                                                 <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.emb.location_name"></span>
                                             </div>
 
-                                            <!-- EMB PARCEL RACK BOXES -->
-                                            <t t-if="res.emb.parcels and res.emb.parcels.length > 0">
+                                            <!-- EMB PARCEL RACK BOXES (GROUPED BY ARRIVAL OCCASION) -->
+                                            <t t-if="res.emb.receipt_groups and res.emb.receipt_groups.length > 0">
+                                                <div class="mt-3 pt-3 border-top">
+                                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                                        <span class="text-muted small fw-bold text-uppercase">
+                                                            <i class="fa fa-paint-brush me-1 text-primary"></i> EMB Physical Storage by Arrival Batch:
+                                                        </span>
+                                                        <span class="badge bg-light text-dark border small fw-bold">
+                                                            <t t-esc="res.emb.receipt_groups.length"/> Arrival<t t-if="res.emb.receipt_groups.length > 1">s</t>
+                                                        </span>
+                                                    </div>
+                                                    <div class="d-flex flex-column gap-3">
+                                                        <t t-foreach="res.emb.receipt_groups" t-as="group" t-key="group.receipt_id">
+                                                            <div class="border rounded-4 p-3 bg-light shadow-sm">
+                                                                <div class="d-flex justify-content-between align-items-center pb-2 mb-2 border-bottom flex-wrap gap-2">
+                                                                    <div class="d-flex align-items-center gap-2">
+                                                                        <span class="badge bg-dark text-white font-monospace fs-6 px-3 py-1">
+                                                                            <i class="fa fa-file-text-o me-1 text-info"></i> <t t-esc="group.receipt_name"/>
+                                                                        </span>
+                                                                        <span class="small text-muted" t-if="group.received_date">
+                                                                            <i class="fa fa-calendar me-1"></i> <t t-esc="group.received_date"/>
+                                                                        </span>
+                                                                    </div>
+                                                                    <span class="badge bg-success-subtle text-success fs-6 fw-bold px-3 py-1" t-if="group.received_qty">
+                                                                        Batch Qty: <t t-esc="group.received_qty"/> pcs
+                                                                    </span>
+                                                                </div>
+                                                                <div class="row g-2">
+                                                                    <t t-foreach="group.parcels" t-as="ep" t-key="ep.id">
+                                                                        <div class="col-12">
+                                                                            <div class="parcel-rack-box p-3 rounded-4 shadow-sm border-2 bg-white text-center">
+                                                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                                                    <span class="badge bg-primary-subtle text-primary fs-6 px-3 py-1 rounded-pill fw-bold" t-esc="ep.parcel_name"></span>
+                                                                                    <span class="small text-muted font-monospace" t-esc="group.receipt_name"></span>
+                                                                                </div>
+                                                                                <div class="my-2">
+                                                                                    <div class="rack-title fs-2 fw-black text-primary font-monospace py-2 px-3 bg-light rounded-3 border"
+                                                                                         t-esc="ep.location_name"></div>
+                                                                                    <div class="text-muted small mt-1" t-esc="ep.location_full_name"></div>
+                                                                                </div>
+                                                                                <div class="d-flex justify-content-between align-items-center pt-2 border-top mt-2">
+                                                                                    <button class="btn btn-sm btn-outline-info rounded-pill px-3"
+                                                                                            t-on-click="() => this.openParcelHistory(ep.id, ep.parcel_name, 'emb')">
+                                                                                        <i class="fa fa-history me-1"></i> Movement Log (<t t-esc="ep.history_count"/>)
+                                                                                    </button>
+                                                                                    <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                                                            t-on-click="() => this.openRelocateModal(ep.id, ep.parcel_name, ep.location_id, 'emb')">
+                                                                                        <i class="fa fa-arrows me-1"></i> Move Rack
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </t>
+                                                                </div>
+                                                            </div>
+                                                        </t>
+                                                    </div>
+                                                </div>
+                                            </t>
+                                            <t t-elif="res.emb.parcels and res.emb.parcels.length > 0">
                                                 <div class="mt-3 pt-3 border-top">
                                                     <div class="text-muted small fw-bold text-uppercase mb-2">
                                                         <i class="fa fa-paint-brush me-1"></i> EMB Parcel Physical Storage:

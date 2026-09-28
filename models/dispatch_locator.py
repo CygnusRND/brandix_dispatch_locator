@@ -237,6 +237,7 @@ class BrandixDispatchLocator(models.TransientModel):
             'issued_date': trims_issued_date,
             'location_name': trims_location,
             'parcels': trims_parcels,
+            'receipt_groups': trims_data.get('receipt_groups', []),
         }
 
         # 4. Embellishment (EMB) Pool & Status
@@ -245,7 +246,7 @@ class BrandixDispatchLocator(models.TransientModel):
         emb_pool_received = float(getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0)
         emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
 
-        emb_data = self._get_component_info(docket, sched, comp_type='emb') if is_emb else {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': []}
+        emb_data = self._get_component_info(docket, sched, comp_type='emb') if is_emb else {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': [], 'receipt_groups': []}
         has_validated_emb = emb_data['has_validated']
         emb_location = emb_data['location_display']
         emb_parcels = emb_data.get('parcels', [])
@@ -281,6 +282,7 @@ class BrandixDispatchLocator(models.TransientModel):
             'is_delivered': getattr(docket, 'delivery_status', 'pending') == 'done',
             'location_name': emb_location,
             'parcels': emb_parcels,
+            'receipt_groups': emb_data.get('receipt_groups', []),
         }
 
         # Check pending items for this docket
@@ -648,6 +650,8 @@ class BrandixDispatchLocator(models.TransientModel):
                     sl.complete_name as location_complete_name,
                     bcr.id as receipt_id,
                     bcr.name as receipt_name,
+                    COALESCE(bcr.received_qty, 0) as receipt_qty,
+                    COALESCE(bcr.received_date, bcr.write_date) as received_date,
                     bcrl.id as line_id,
                     bcrl.parcel_no,
                     bcrl.barcode
@@ -669,24 +673,43 @@ class BrandixDispatchLocator(models.TransientModel):
 
             History = self.env['brandix.docket.parcel.location.history'].sudo() if 'brandix.docket.parcel.location.history' in self.env else None
 
+            receipt_groups_dict = {}
             for r in rows:
                 has_validated = True
                 loc = r.get('location_name') or r.get('location_complete_name')
                 if loc and loc not in locations:
                     locations.append(loc)
                 line_id = r.get('line_id')
+                rec_id = r.get('receipt_id')
                 hist_count = History.search_count([('component_receipt_line_id', '=', line_id)]) if (History and line_id) else 0
-                parcels_info.append({
+
+                parcel_item = {
                     'id': line_id,
                     'parcel_number': r.get('parcel_no'),
                     'parcel_name': f"{'Trims' if comp_type == 'trim' else 'EMB'} Parcel #{r.get('parcel_no')}",
                     'location_id': r.get('location_id'),
                     'location_name': r.get('location_name') or 'UNASSIGNED',
                     'location_full_name': r.get('location_complete_name') or 'Not Placed Yet',
+                    'receipt_id': rec_id,
                     'receipt_name': r.get('receipt_name'),
                     'comp_type': comp_type,
                     'history_count': hist_count,
-                })
+                }
+                parcels_info.append(parcel_item)
+
+                if rec_id not in receipt_groups_dict:
+                    rec_date = r.get('received_date')
+                    date_str = fields.Datetime.to_string(rec_date) if rec_date else ''
+                    receipt_groups_dict[rec_id] = {
+                        'receipt_id': rec_id,
+                        'receipt_name': r.get('receipt_name') or f"Receipt #{rec_id}",
+                        'received_qty': r.get('receipt_qty') or 0,
+                        'received_date': date_str,
+                        'parcels': []
+                    }
+                receipt_groups_dict[rec_id]['parcels'].append(parcel_item)
+
+            receipt_groups = list(receipt_groups_dict.values())
 
             # 2. Check if receipts exist with non-empty location_summary
             if not locations:
@@ -765,11 +788,12 @@ class BrandixDispatchLocator(models.TransientModel):
             return {
                 'has_validated': has_validated,
                 'location_display': location_display,
-                'parcels': parcels_info
+                'parcels': parcels_info,
+                'receipt_groups': receipt_groups,
             }
         except Exception as e:
             _logger.exception("Database error getting component info for docket %s: %s", getattr(docket, 'name', 'unknown'), str(e))
-            return {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': []}
+            return {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': [], 'receipt_groups': []}
 
     @api.model
     def get_warehouse_racks_overview(self):
