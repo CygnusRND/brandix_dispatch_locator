@@ -178,8 +178,8 @@
                                     <i class="fa fa-id-card text-info"></i> JOB DETAILS : 
                                     <span class="badge bg-warning text-dark fs-3 fw-black px-3 py-1 font-monospace shadow-sm" style="color: #000000 !important; background-color: #ffc107 !important; font-weight: 900 !important; letter-spacing: 0.5px;" t-esc="res.job.docket_no"></span>
                                 </span>
-                                <span class="badge fs-6 px-3 py-2 rounded-pill"
-                                      t-att-class="res.job.is_label_printed ? 'bg-success' : 'bg-warning text-dark'">
+                                <span class="badge fs-6 px-3 py-2 rounded-pill shadow-sm"
+                                      t-att-style="res.job.is_label_printed ? 'color: #ffffff !important; background-color: #198754 !important; font-weight: 800 !important;' : 'color: #000000 !important; background-color: #ffc107 !important; font-weight: 900 !important;'">
                                     <i class="fa fa-tag me-1"></i> <t t-esc="res.job.is_label_printed ? 'Label Printed' : 'Label Unprinted'"/>
                                 </span>
                             </div>
