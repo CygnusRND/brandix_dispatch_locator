@@ -183,9 +183,9 @@ class BrandixDispatchLocator(models.TransientModel):
 
         # 4. Embellishment (EMB) Pool & Status
         is_emb = (docket.style_type == 'emb')
-        emb_pool_balance = sched.emb_pool_balance if sched else 0.0
-        emb_pool_received = sched.emb_pool_received if sched else 0.0
-        emb_status = docket.emb_status or (sched.emb_status if sched else 'pending')
+        emb_pool_balance = getattr(sched, 'remaining_emb_balance', 0.0) if sched else 0.0
+        emb_pool_received = getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0
+        emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
 
         # Find EMB Physical Rack/Bin
         emb_location = 'Not Assigned'
@@ -310,8 +310,8 @@ class BrandixDispatchLocator(models.TransientModel):
                 'trims_status': sched.trims_status or 'pending',
                 'first_issued_docket': sched.first_issued_docket_id.name if sched.first_issued_docket_id else '',
                 'trims_issued_date': fields.Datetime.to_string(sched.trims_issued_date) if sched.trims_issued_date else '',
-                'emb_pool_balance': sched.emb_pool_balance,
-                'emb_pool_received': sched.emb_pool_received,
+                'emb_pool_balance': getattr(sched, 'remaining_emb_balance', 0.0),
+                'emb_pool_received': getattr(sched, 'total_emb_received_qty', 0.0),
                 'total_dockets_count': len(dockets_summary),
                 'ready_dockets_count': len([d for d in dockets_summary if d['can_issue']]),
             },
