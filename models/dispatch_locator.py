@@ -145,35 +145,53 @@ class BrandixDispatchLocator(models.TransientModel):
                     'history_count': p_loc.history_count if hasattr(p_loc, 'history_count') else 0,
                 })
 
+        # Force fresh compute of component statuses on docket
+        if hasattr(docket, '_compute_component_statuses'):
+            docket._compute_component_statuses()
+
         # 3. Trims Readiness & Location
+        CompReceipt = self.env['brandix.component.receipt'].sudo() if 'brandix.component.receipt' in self.env else None
+
+        has_validated_trims = False
+        trims_location = 'Not Assigned'
+        if CompReceipt:
+            docket_trims = CompReceipt.search([
+                ('component_type', '=', 'trim'),
+                ('state', '=', 'validated'),
+                '|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])
+            ], limit=1)
+            sched_trims = None
+            if sched:
+                sched_trims = CompReceipt.search([
+                    ('component_type', '=', 'trim'),
+                    ('receipt_level', '=', 'schedule'),
+                    ('state', '=', 'validated'),
+                    '|', ('schedule_master_id', '=', sched.id), ('schedule_master_ids', 'in', [sched.id])
+                ], limit=1)
+            validated_trims_rec = docket_trims or sched_trims
+            if validated_trims_rec:
+                has_validated_trims = True
+                trims_location = validated_trims_rec.location_summary or 'In Store'
+                if trims_location == '-':
+                    trims_location = 'In Store'
+
         trims_status = docket.trims_status or (sched.trims_status if sched else 'pending')
         carrier_docket_name = docket.trims_issued_with_docket_id.name if docket.trims_issued_with_docket_id else ''
         if not carrier_docket_name and sched and sched.first_issued_docket_id:
             carrier_docket_name = sched.first_issued_docket_id.name
         trims_issued_date = fields.Datetime.to_string(sched.trims_issued_date) if sched and sched.trims_issued_date else ''
 
-        # Search Trims physical location in warehouse if in store
-        trims_location = 'Not Assigned'
-        if 'brandix.component.receipt' in self.env:
-            CompReceipt = self.env['brandix.component.receipt'].sudo()
-            domain = [('component_type', '=', 'trim'), ('state', '!=', 'cancelled')]
-            match_domain = ['|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
-            if sched:
-                match_domain = ['|', '|', '|',
-                    ('docket_id', '=', docket.id),
-                    ('docket_ids', 'in', [docket.id]),
-                    ('schedule_master_id', '=', sched.id),
-                    ('schedule_master_ids', 'in', [sched.id])
-                ]
-            trims_rec = CompReceipt.search(domain + match_domain, limit=1)
-            if trims_rec:
-                trims_location = trims_rec.location_summary or 'In Store'
-                if trims_location == '-':
-                    trims_location = 'In Store'
+        # Trims is ready if in store (ok), already issued, carrier docket, validated receipt exists, or delivery is done
+        is_trims_ready = (
+            trims_status in ('ok', 'issued', 'already_issued', 'ready')
+            or has_validated_trims
+            or (docket.delivery_status == 'done')
+        )
 
         trims_info = {
             'status': trims_status,
-            'is_ready': trims_status in ('issued', 'already_issued') or (docket.delivery_status == 'done'),
+            'is_ready': is_trims_ready,
+            'is_in_store': trims_status == 'ok' or (has_validated_trims and trims_status != 'already_issued'),
             'is_carrier': docket.trims_status == 'issued',
             'is_already_issued': docket.trims_status == 'already_issued',
             'carrier_docket': carrier_docket_name,
@@ -187,29 +205,42 @@ class BrandixDispatchLocator(models.TransientModel):
         emb_pool_received = getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0
         emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
 
-        # Find EMB Physical Rack/Bin
+        # Check direct EMB receipts
+        has_validated_emb = False
         emb_location = 'Not Assigned'
-        if is_emb and 'brandix.component.receipt' in self.env:
-            CompReceipt = self.env['brandix.component.receipt'].sudo()
-            domain = [('component_type', '=', 'emb'), ('state', '!=', 'cancelled')]
-            match_domain = ['|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])]
+        if is_emb and CompReceipt:
+            docket_emb = CompReceipt.search([
+                ('component_type', '=', 'emb'),
+                ('state', '=', 'validated'),
+                '|', ('docket_id', '=', docket.id), ('docket_ids', 'in', [docket.id])
+            ], limit=1)
+            sched_emb = None
             if sched:
-                match_domain = ['|', '|', '|',
-                    ('docket_id', '=', docket.id),
-                    ('docket_ids', 'in', [docket.id]),
-                    ('schedule_master_id', '=', sched.id),
-                    ('schedule_master_ids', 'in', [sched.id])
-                ]
-            emb_rec = CompReceipt.search(domain + match_domain, limit=1)
-            if emb_rec:
-                emb_location = emb_rec.location_summary or 'In Store'
+                sched_emb = CompReceipt.search([
+                    ('component_type', '=', 'emb'),
+                    ('state', '=', 'validated'),
+                    '|', ('schedule_master_id', '=', sched.id), ('schedule_master_ids', 'in', [sched.id])
+                ], limit=1)
+            validated_emb_rec = docket_emb or sched_emb
+            if validated_emb_rec:
+                has_validated_emb = True
+                emb_location = validated_emb_rec.location_summary or 'In Store'
                 if emb_location == '-':
                     emb_location = 'In Store'
+
+        req_emb_qty = docket.docket_qty or docket.co_qty or 0.0
+        is_emb_ready = (
+            (not is_emb)
+            or (emb_status in ('ok', 'ready', 'issued'))
+            or (docket.delivery_status == 'done')
+            or has_validated_emb
+            or (emb_pool_balance >= req_emb_qty and (emb_pool_balance > 0 or req_emb_qty == 0))
+        )
 
         emb_info = {
             'is_emb_style': is_emb,
             'status': emb_status,
-            'is_ready': (not is_emb) or (emb_status == 'ready') or (docket.delivery_status == 'done'),
+            'is_ready': is_emb_ready,
             'pool_balance': emb_pool_balance,
             'pool_received': emb_pool_received,
             'location_name': emb_location

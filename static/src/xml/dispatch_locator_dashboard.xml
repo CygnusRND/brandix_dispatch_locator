@@ -260,7 +260,7 @@
                                               t-att-class="res.trims.is_ready ? 'text-success' : 'text-danger'">
                                             <t t-if="res.trims.is_already_issued">CARRIER ISSUED</t>
                                             <t t-elif="res.trims.is_carrier">CARRIER DOCKET</t>
-                                            <t t-elif="res.trims.is_ready">READY</t>
+                                            <t t-elif="res.trims.is_ready">READY IN STORE</t>
                                             <t t-else="">PENDING</t>
                                         </span>
                                     </div>
@@ -279,6 +279,12 @@
                                             <div class="alert alert-success p-3 rounded-3 mb-3">
                                                 <i class="fa fa-star text-warning me-2"></i>
                                                 <strong>This is the Carrier Docket!</strong> Dispatches all trims for this schedule.
+                                            </div>
+                                        </t>
+                                        <t t-elif="res.trims.is_ready">
+                                            <div class="alert alert-success p-3 rounded-3 mb-3">
+                                                <i class="fa fa-check-circle text-success me-2"></i>
+                                                <strong>Trims Received in Store!</strong> Required trims components are verified and in stock.
                                             </div>
                                         </t>
                                         <t t-else="">
