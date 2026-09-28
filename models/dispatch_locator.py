@@ -240,9 +240,9 @@ class BrandixDispatchLocator(models.TransientModel):
         }
 
         # 4. Embellishment (EMB) Pool & Status
-        is_emb = (docket.style_type == 'emb')
-        emb_pool_balance = getattr(sched, 'remaining_emb_balance', 0.0) if sched else 0.0
-        emb_pool_received = getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0
+        is_emb = (getattr(docket, 'style_type', '') == 'emb')
+        emb_pool_balance = float(getattr(sched, 'remaining_emb_balance', 0.0) if sched else 0.0)
+        emb_pool_received = float(getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0)
         emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
 
         emb_data = self._get_component_info(docket, sched, comp_type='emb') if is_emb else {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': []}
@@ -250,11 +250,20 @@ class BrandixDispatchLocator(models.TransientModel):
         emb_location = emb_data['location_display']
         emb_parcels = emb_data.get('parcels', [])
 
-        req_emb_qty = docket.docket_qty or docket.co_qty or 0.0
+        req_emb_qty = float(getattr(docket, 'docket_qty', 0.0) or getattr(docket, 'co_qty', 0.0) or 0.0)
+
+        # If schedule pool balance is 0 but direct validated receipt exists for this docket
+        if has_validated_emb and emb_pool_balance == 0.0 and req_emb_qty > 0.0:
+            emb_pool_balance = req_emb_qty
+            emb_pool_received = req_emb_qty
+
+        bal_after = emb_pool_balance - req_emb_qty if getattr(docket, 'delivery_status', 'pending') != 'done' else emb_pool_balance
+        is_sufficient = (emb_pool_balance >= req_emb_qty) or (getattr(docket, 'delivery_status', 'pending') == 'done') or has_validated_emb
+
         is_emb_ready = (
             (not is_emb)
             or (emb_status in ('ok', 'ready', 'issued'))
-            or (docket.delivery_status == 'done')
+            or (getattr(docket, 'delivery_status', 'pending') == 'done')
             or has_validated_emb
             or (emb_pool_balance >= req_emb_qty and (emb_pool_balance > 0 or req_emb_qty == 0))
         )
@@ -263,8 +272,13 @@ class BrandixDispatchLocator(models.TransientModel):
             'is_emb_style': is_emb,
             'status': emb_status,
             'is_ready': is_emb_ready,
-            'pool_balance': emb_pool_balance,
-            'pool_received': emb_pool_received,
+            'req_qty': int(req_emb_qty),
+            'pool_balance': int(emb_pool_balance),
+            'pool_received': int(emb_pool_received),
+            'balance_after_dispatch': int(bal_after),
+            'is_sufficient': is_sufficient,
+            'shortage_qty': int(max(0.0, req_emb_qty - emb_pool_balance)) if not is_sufficient else 0,
+            'is_delivered': getattr(docket, 'delivery_status', 'pending') == 'done',
             'location_name': emb_location,
             'parcels': emb_parcels,
         }

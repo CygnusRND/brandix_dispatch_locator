@@ -372,13 +372,78 @@
                                             </div>
                                         </t>
                                         <t t-else="">
-                                            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-                                                <span class="text-muted fw-semibold">Schedule EMB Pool Balance:</span>
-                                                <span class="fw-bold fs-4 text-primary" t-esc="res.emb.pool_balance"></span>
+                                            <!-- EMB STATUS BANNER -->
+                                            <t t-if="res.emb.is_delivered">
+                                                <div class="alert alert-primary p-3 rounded-3 mb-3 d-flex justify-content-between align-items-center">
+                                                    <div>
+                                                        <i class="fa fa-truck me-2"></i>
+                                                        <strong>Already Dispatched!</strong> EMB components issued to sewing line.
+                                                    </div>
+                                                    <span class="badge bg-primary text-white fs-6 px-3 py-1 font-monospace">
+                                                        <t t-esc="res.emb.req_qty"/> pcs Issued
+                                                    </span>
+                                                </div>
+                                            </t>
+                                            <t t-elif="res.emb.is_ready">
+                                                <div class="alert alert-success p-3 rounded-3 mb-3 d-flex justify-content-between align-items-center">
+                                                    <div>
+                                                        <i class="fa fa-check-circle text-success me-2"></i>
+                                                        <strong>EMB Pool Sufficient!</strong> Ready for dispatch.
+                                                    </div>
+                                                    <span class="badge bg-success text-white fs-6 px-3 py-1 font-monospace">
+                                                        Req: <t t-esc="res.emb.req_qty"/> pcs
+                                                    </span>
+                                                </div>
+                                            </t>
+                                            <t t-else="">
+                                                <div class="alert alert-danger p-3 rounded-3 mb-3 d-flex justify-content-between align-items-center">
+                                                    <div>
+                                                        <i class="fa fa-exclamation-triangle text-danger me-2"></i>
+                                                        <strong>Insufficient EMB Pool!</strong> Cannot issue docket.
+                                                    </div>
+                                                    <span class="badge bg-danger text-white fs-6 px-3 py-1 font-monospace">
+                                                        Shortage: -<t t-esc="res.emb.shortage_qty"/> pcs
+                                                    </span>
+                                                </div>
+                                            </t>
+
+                                            <!-- 3-COL EMB METRICS (DOCKET REQ, POOL AVAIL, BAL AFTER ISSUE) -->
+                                            <div class="row g-2 mb-3">
+                                                <div class="col-4">
+                                                    <div class="p-2 border rounded-3 text-center bg-light">
+                                                        <span class="text-muted small fw-bold d-block text-uppercase">Docket Requires</span>
+                                                        <span class="fs-3 fw-black text-dark font-monospace" t-esc="res.emb.req_qty"></span>
+                                                        <span class="small text-muted d-block">pcs</span>
+                                                    </div>
+                                                </div>
+                                                <div class="col-4">
+                                                    <div class="p-2 border rounded-3 text-center bg-light">
+                                                        <span class="text-muted small fw-bold d-block text-uppercase">Pool Available</span>
+                                                        <span class="fs-3 fw-black text-primary font-monospace" t-esc="res.emb.pool_balance"></span>
+                                                        <span class="small text-muted d-block">pcs</span>
+                                                    </div>
+                                                </div>
+                                                <div class="col-4">
+                                                    <div class="p-2 border rounded-3 text-center"
+                                                         t-att-class="res.emb.balance_after_dispatch >= 0 ? 'bg-success-subtle border-success' : 'bg-danger-subtle border-danger'">
+                                                        <span class="small fw-bold d-block text-uppercase"
+                                                              t-att-class="res.emb.balance_after_dispatch >= 0 ? 'text-success' : 'text-danger'">
+                                                            Bal After Issue
+                                                        </span>
+                                                        <span class="fs-3 fw-black font-monospace"
+                                                              t-att-class="res.emb.balance_after_dispatch >= 0 ? 'text-success' : 'text-danger'"
+                                                              t-esc="res.emb.balance_after_dispatch"></span>
+                                                        <span class="small d-block"
+                                                              t-att-class="res.emb.balance_after_dispatch >= 0 ? 'text-success' : 'text-danger'">pcs</span>
+                                                    </div>
+                                                </div>
                                             </div>
+
                                             <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-                                                <span class="text-muted fw-semibold">Total EMB Received:</span>
-                                                <span class="fw-bold fs-4 text-dark" t-esc="res.emb.pool_received"></span>
+                                                <span class="text-muted fw-semibold">Total EMB Received (GRN):</span>
+                                                <span class="fw-bold fs-5 text-dark font-monospace">
+                                                    <t t-esc="res.emb.pool_received"/> pcs
+                                                </span>
                                             </div>
                                             <div class="d-flex justify-content-between align-items-center py-2">
                                                 <span class="text-muted fw-semibold">EMB Storage Rack / Bin:</span>
