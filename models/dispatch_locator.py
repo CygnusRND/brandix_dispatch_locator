@@ -194,8 +194,8 @@ class BrandixDispatchLocator(models.TransientModel):
                     'parcel_number': p_loc.parcel_number,
                     'parcel_name': p_loc.parcel_name or f"Parcel #{p_loc.parcel_number}",
                     'location_id': p_loc.location_dest_id.id if p_loc.location_dest_id else False,
-                    'location_name': p_loc.location_dest_id.name if p_loc.location_dest_id else 'UNASSIGNED',
-                    'location_full_name': p_loc.location_dest_id.complete_name if p_loc.location_dest_id else 'Not Placed Yet',
+                    'location_name': p_loc.location_dest_id.name if p_loc.location_dest_id else ('ISSUED TO LINE' if getattr(docket, 'delivery_status', 'pending') == 'done' else 'UNASSIGNED'),
+                    'location_full_name': p_loc.location_dest_id.complete_name if p_loc.location_dest_id else ('Issued to Production Line' if getattr(docket, 'delivery_status', 'pending') == 'done' else 'Not Placed Yet'),
                     'grn_name': grn.name,
                     'grn_state': grn.state,
                     'history_count': p_loc.history_count if hasattr(p_loc, 'history_count') else 0,
@@ -472,6 +472,8 @@ class BrandixDispatchLocator(models.TransientModel):
             picking = p.picking_id
             if picking and picking.state != 'cancel':
                 docket = picking.docket_id
+                if docket and getattr(docket, 'delivery_status', 'pending') == 'done':
+                    continue
                 stored_items.append({
                     'parcel_id': p.id,
                     'parcel_name': p.parcel_name or f"Parcel #{p.parcel_number}",
@@ -505,6 +507,8 @@ class BrandixDispatchLocator(models.TransientModel):
                 LEFT JOIN brandix_schedule_master bsm ON bcr.schedule_master_id = bsm.id
                 WHERE bcrl.location_id = %s
                   AND bcr.state = 'validated'
+                  AND (pt.delivery_status IS NULL OR pt.delivery_status != 'done')
+                  AND (bcr.component_type != 'trim' OR bsm.trims_status IS NULL OR bsm.trims_status != 'issued')
                 ORDER BY bcr.id DESC, bcrl.parcel_no ASC
             """
             with self.env.cr.savepoint():
@@ -796,48 +800,199 @@ class BrandixDispatchLocator(models.TransientModel):
             return {'has_validated': False, 'location_display': 'Not Assigned', 'parcels': [], 'receipt_groups': []}
 
     @api.model
+    def _clear_parcels_on_line_issue(self, docket):
+        """
+        Clears warehouse physical racks and logs 'OUT - Issued to Production Line'
+        in location audit history for:
+        1. Cut panel parcels of this docket.
+        2. Trims parcels (if this docket is carrier docket for its schedule).
+        3. Embellishment parcels (if docket-wise EMB).
+        """
+        if not docket:
+            return
+
+        History = self.env['brandix.docket.parcel.location.history'].sudo() if 'brandix.docket.parcel.location.history' in self.env else None
+        CompLine = self.env['brandix.component.receipt.line'].sudo() if 'brandix.component.receipt.line' in self.env else None
+        ParcelLoc = self.env['brandix.docket.parcel.location'].sudo() if 'brandix.docket.parcel.location' in self.env else None
+
+        module_name = getattr(docket, 'fr_module', '') or getattr(docket, 'module', '') or '-'
+        docket_name = docket.name or ''
+
+        # 1. Panel Cut Parcels
+        if ParcelLoc and History:
+            cut_parcels = ParcelLoc.search([
+                ('location_dest_id', '!=', False),
+                ('picking_id.state', '!=', 'cancel'),
+                '|', ('picking_id.docket_id', '=', docket.id), ('picking_id.job_number', '=ilike', docket_name)
+            ])
+            for cp in cut_parcels:
+                old_loc = cp.location_dest_id
+                History.create({
+                    'parcel_location_id': cp.id,
+                    'parcel_type': 'cut',
+                    'parcel_number': cp.parcel_number,
+                    'parcel_name': cp.parcel_name or f"Parcel #{cp.parcel_number}",
+                    'docket_id': docket.id,
+                    'old_location_id': old_loc.id,
+                    'new_location_id': False,
+                    'old_location_name': old_loc.display_name,
+                    'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
+                    'user_id': self.env.user.id,
+                    'change_date': fields.Datetime.now(),
+                    'notes': f"Issued to Production Line with Docket {docket_name}"
+                })
+                cp.with_context(skip_history_create=True).write({'location_dest_id': False})
+
+        # 2. Trims Parcels (if carrier docket or schedule trims status is issued)
+        if CompLine and History:
+            schedules = docket.schedule_master_ids or docket.schedule_master_id
+            if not schedules and docket.schedule_no and 'brandix.schedule.master' in self.env:
+                sched_names = [s.strip() for s in str(docket.schedule_no).replace(';', ',').split(',') if s.strip()]
+                schedules = self.env['brandix.schedule.master'].sudo().search([('name', 'in', sched_names)])
+
+            for sched in schedules:
+                is_carrier = (sched.first_issued_docket_id and sched.first_issued_docket_id.id == docket.id) or (docket.trims_status == 'issued')
+                if is_carrier or sched.trims_status == 'issued':
+                    trim_lines = CompLine.search([
+                        ('receipt_id.component_type', '=', 'trim'),
+                        ('receipt_id.state', '=', 'validated'),
+                        ('location_id', '!=', False),
+                        '|', ('receipt_id.schedule_master_id', '=', sched.id), ('receipt_id.schedule_master_id.name', '=ilike', sched.name)
+                    ])
+                    for tl in trim_lines:
+                        old_loc = tl.location_id
+                        rec_name = tl.receipt_id.name if tl.receipt_id else ''
+                        History.create({
+                            'component_receipt_line_id': tl.id,
+                            'parcel_type': 'trim',
+                            'parcel_number': tl.parcel_no,
+                            'parcel_name': f"Trims Parcel #{tl.parcel_no} ({rec_name})",
+                            'docket_id': docket.id,
+                            'old_location_id': old_loc.id,
+                            'new_location_id': False,
+                            'old_location_name': old_loc.display_name,
+                            'new_location_name': f"OUT - Issued to Production Line (Module: {module_name}, Carrier Docket: {docket_name})",
+                            'user_id': self.env.user.id,
+                            'change_date': fields.Datetime.now(),
+                            'notes': f"Dispatched to Line with Carrier Docket {docket_name}"
+                        })
+                        tl.with_context(skip_history_create=True).write({'location_id': False})
+                        if tl.receipt_id:
+                            try:
+                                tl.receipt_id.write({'location_summary': 'Issued to Line'})
+                            except Exception:
+                                pass
+
+        # 3. Docket-wise Embellishment (EMB)
+        if CompLine and History:
+            emb_lines = CompLine.search([
+                ('receipt_id.component_type', '=', 'emb'),
+                ('receipt_id.state', '=', 'validated'),
+                ('location_id', '!=', False),
+                '|', ('receipt_id.docket_id', '=', docket.id), ('barcode', '=ilike', f"%{docket_name}%")
+            ])
+            for el in emb_lines:
+                old_loc = el.location_id
+                rec_name = el.receipt_id.name if el.receipt_id else ''
+                History.create({
+                    'component_receipt_line_id': el.id,
+                    'parcel_type': 'emb',
+                    'parcel_number': el.parcel_no,
+                    'parcel_name': f"EMB Parcel #{el.parcel_no} ({rec_name})",
+                    'docket_id': docket.id,
+                    'old_location_id': old_loc.id,
+                    'new_location_id': False,
+                    'old_location_name': old_loc.display_name,
+                    'new_location_name': f"OUT - Issued to Production Line (Module: {module_name})",
+                    'user_id': self.env.user.id,
+                    'change_date': fields.Datetime.now(),
+                    'notes': f"Issued to Production Line with Docket {docket_name}"
+                })
+                el.with_context(skip_history_create=True).write({'location_id': False})
+                if el.receipt_id:
+                    try:
+                        el.receipt_id.write({'location_summary': 'Issued to Line'})
+                    except Exception:
+                        pass
+
+    @api.model
+    def clean_completed_dockets_locations(self):
+        """Sweeps already delivered dockets to ensure their physical racks are cleared and OUT history logged"""
+        try:
+            ProductTemplate = self.env['product.template'].sudo()
+            delivered_dockets = ProductTemplate.search([
+                ('is_docket', '=', True),
+                ('delivery_status', '=', 'done')
+            ])
+            for doc in delivered_dockets:
+                try:
+                    self._clear_parcels_on_line_issue(doc)
+                except Exception as e:
+                    _logger.warning("Error cleaning locations for delivered docket %s: %s", getattr(doc, 'name', 'unknown'), str(e))
+            return True
+        except Exception as e:
+            _logger.warning("Error running clean_completed_dockets_locations: %s", str(e))
+            return False
+
+    @api.model
     def get_warehouse_racks_overview(self):
-        """Fetches all warehouse internal racks/bins with real-time parcel counts"""
+        """Fetches all warehouse internal racks/bins with real-time parcel counts (excluding issued items)"""
         try:
             StockLocation = self.env['stock.location'].sudo()
-            ParcelLoc = self.env['brandix.docket.parcel.location'].sudo()
-
             locations = StockLocation.search([
                 ('usage', '=', 'internal'),
                 ('location_id', '!=', False)
             ], order='name asc')
 
+            # Efficient SQL counts excluding items whose docket has been delivered/issued to line
+            sql_cut = """
+                SELECT bdpl.location_dest_id, COUNT(*)
+                FROM brandix_docket_parcel_location bdpl
+                JOIN stock_picking sp ON bdpl.picking_id = sp.id
+                LEFT JOIN product_template pt ON sp.docket_id = pt.id
+                WHERE bdpl.location_dest_id IS NOT NULL
+                  AND sp.state != 'cancel'
+                  AND (pt.delivery_status IS NULL OR pt.delivery_status != 'done')
+                GROUP BY bdpl.location_dest_id
+            """
+            cut_counts = {}
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute(sql_cut)
+                    cut_counts = dict(self.env.cr.fetchall())
+            except Exception as e:
+                _logger.warning("Error fetching cut parcel rack counts: %s", str(e))
+
+            sql_comp = """
+                SELECT bcrl.location_id, COUNT(*)
+                FROM brandix_component_receipt_line bcrl
+                JOIN brandix_component_receipt bcr ON bcrl.receipt_id = bcr.id
+                LEFT JOIN product_template pt ON bcr.docket_id = pt.id
+                LEFT JOIN brandix_schedule_master bsm ON bcr.schedule_master_id = bsm.id
+                WHERE bcrl.location_id IS NOT NULL
+                  AND bcr.state = 'validated'
+                  AND (pt.delivery_status IS NULL OR pt.delivery_status != 'done')
+                  AND (bcr.component_type != 'trim' OR bsm.trims_status IS NULL OR bsm.trims_status != 'issued')
+                GROUP BY bcrl.location_id
+            """
+            comp_counts = {}
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute(sql_comp)
+                    comp_counts = dict(self.env.cr.fetchall())
+            except Exception as e:
+                _logger.warning("Error fetching comp parcel rack counts: %s", str(e))
+
             racks = []
             for loc in locations:
-                count = ParcelLoc.search_count([
-                    ('location_dest_id', '=', loc.id),
-                    ('picking_id.state', 'not in', ('done', 'cancel'))
-                ])
-                done_count = ParcelLoc.search_count([
-                    ('location_dest_id', '=', loc.id),
-                    ('picking_id.state', '=', 'done')
-                ])
-
-                # Count component parcels in this location
-                comp_count = 0
-                try:
-                    with self.env.cr.savepoint():
-                        self.env.cr.execute("""
-                            SELECT COUNT(*) FROM brandix_component_receipt_line bcrl
-                            JOIN brandix_component_receipt bcr ON bcrl.receipt_id = bcr.id
-                            WHERE bcrl.location_id = %s AND bcr.state = 'validated'
-                        """, (loc.id,))
-                        comp_count = self.env.cr.fetchone()[0] or 0
-                except Exception:
-                    comp_count = 0
-
+                active_count = cut_counts.get(loc.id, 0) + comp_counts.get(loc.id, 0)
                 racks.append({
                     'id': loc.id,
                     'name': loc.name,
                     'complete_name': loc.complete_name,
-                    'active_parcel_count': count + comp_count,
-                    'done_parcel_count': done_count,
-                    'total_count': count + done_count + comp_count
+                    'active_parcel_count': active_count,
+                    'done_parcel_count': 0,
+                    'total_count': active_count
                 })
 
             return racks

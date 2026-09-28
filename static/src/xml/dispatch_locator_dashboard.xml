@@ -17,6 +17,13 @@
                 </div>
 
                 <div class="d-flex align-items-center gap-3">
+                    <!-- Live Auto-Sync Indicator -->
+                    <div class="d-none d-md-flex align-items-center gap-2 pe-3 border-end">
+                        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-2 fw-bold shadow-sm">
+                            <i class="fa fa-circle text-success me-1"></i> Live Auto-Sync
+                        </span>
+                    </div>
+
                     <!-- Clock & Date -->
                     <div class="clock-display text-end pe-3 border-end">
                         <div class="fs-4 fw-bold text-dark font-monospace" t-esc="state.currentTime"></div>
@@ -234,8 +241,9 @@
 
                                                     <!-- Physical Location Name (Huge Rack/Bin font) -->
                                                     <div class="my-3">
-                                                        <div class="text-muted small fw-bold text-uppercase mb-1">Assigned Storage Rack</div>
-                                                        <div class="rack-title display-6 fw-black text-primary font-monospace py-2 px-3 bg-primary-subtle rounded-3 border"
+                                                        <div class="text-muted small fw-bold text-uppercase mb-1">Storage Status / Rack</div>
+                                                        <div class="rack-title display-6 fw-black font-monospace py-2 px-3 rounded-3 border"
+                                                             t-att-class="p.location_name === 'ISSUED TO LINE' ? 'bg-secondary text-white' : 'text-primary bg-primary-subtle'"
                                                              t-esc="p.location_name"></div>
                                                         <div class="text-muted small mt-1" t-esc="p.location_full_name"></div>
                                                     </div>
@@ -247,9 +255,13 @@
                                                             <i class="fa fa-history me-1"></i> Movement Log (<t t-esc="p.history_count"/>)
                                                         </button>
                                                         <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                                t-if="p.location_id"
                                                                 t-on-click="() => this.openRelocateModal(p.id, p.parcel_name, p.location_id)">
                                                             <i class="fa fa-arrows me-1"></i> Move Rack
                                                         </button>
+                                                        <span class="badge bg-success-subtle text-success border small px-2 py-1" t-else="">
+                                                            <i class="fa fa-check me-1"></i> Dispatched
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -825,7 +837,7 @@
                                                     <span class="fw-bold text-dark font-monospace">
                                                         <span class="badge bg-secondary me-2"><t t-esc="log.old_location"/></span>
                                                         <i class="fa fa-long-arrow-right text-primary me-2"></i>
-                                                        <span class="badge bg-primary fs-6"><t t-esc="log.new_location"/></span>
+                                                        <span t-att-class="log.new_location and log.new_location.includes('OUT') ? 'badge bg-danger fs-6 text-white shadow-sm' : 'badge bg-primary fs-6'"><t t-esc="log.new_location"/></span>
                                                     </span>
                                                     <small class="text-muted" t-esc="log.change_date"></small>
                                                 </div>

@@ -33,12 +33,22 @@ export class DispatchLocatorDashboard extends Component {
             relocateParcelName: "",
             selectedNewLocationId: "",
             relocateReason: "",
+            // Live Status
+            lastSyncedTime: this.formatTime(now),
         });
 
         this.clockTimer = null;
+        this.autoRefreshTimer = null;
+        this.inactivityTimer = null;
+        this.INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes (120,000 ms)
+
+        this.boundHandleActivity = this.handleUserActivity.bind(this);
+        this.interactionEvents = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
 
         onMounted(() => {
             this.startClock();
+            this.startAutoRefresh();
+            this.startInactivityMonitoring();
             this.loadWarehouseRacks();
             if (this.searchInput.el) {
                 this.searchInput.el.focus();
@@ -47,9 +57,14 @@ export class DispatchLocatorDashboard extends Component {
 
         onWillDestroy(() => {
             this.stopClock();
+            this.stopAutoRefresh();
+            this.stopInactivityMonitoring();
         });
     }
 
+    /* ----------------------------------------------------
+       CLOCK & LIVE AUTO-REFRESH (SMART BOARD REAL-TIME)
+       ---------------------------------------------------- */
     startClock() {
         this.clockTimer = setInterval(() => {
             const now = new Date();
@@ -65,6 +80,98 @@ export class DispatchLocatorDashboard extends Component {
         }
     }
 
+    startAutoRefresh() {
+        // Automatically re-syncs active view every 15 seconds without browser refresh
+        this.autoRefreshTimer = setInterval(() => {
+            this.autoSyncDashboard();
+        }, 15000);
+    }
+
+    stopAutoRefresh() {
+        if (this.autoRefreshTimer) {
+            clearInterval(this.autoRefreshTimer);
+            this.autoRefreshTimer = null;
+        }
+    }
+
+    async autoSyncDashboard() {
+        // Do not auto-sync if modals are actively open
+        if (this.state.historyModalOpen || this.state.relocateModalOpen) {
+            return;
+        }
+
+        try {
+            if (this.state.searchTerm.trim() && this.state.searchResult) {
+                // Background refresh of search data without triggering loading spinner
+                const result = await this.orm.call(
+                    "brandix.dispatch.locator",
+                    "search_dispatch_data",
+                    [this.state.searchTerm.trim()]
+                );
+                if (result && result.status !== 'error') {
+                    this.state.searchResult = result;
+                }
+            }
+
+            if (this.state.activeTab === "racks") {
+                await this.loadWarehouseRacks();
+            }
+
+            this.state.lastSyncedTime = this.formatTime(new Date());
+        } catch (error) {
+            console.warn("Background auto-sync skipped:", error);
+        }
+    }
+
+    /* ----------------------------------------------------
+       INACTIVITY AUTO-TIMEOUT (RESET AFTER 2 MINUTES)
+       ---------------------------------------------------- */
+    startInactivityMonitoring() {
+        this.interactionEvents.forEach(ev => {
+            window.addEventListener(ev, this.boundHandleActivity, { passive: true });
+        });
+        this.resetInactivityTimer();
+    }
+
+    stopInactivityMonitoring() {
+        this.interactionEvents.forEach(ev => {
+            window.removeEventListener(ev, this.boundHandleActivity);
+        });
+        if (this.inactivityTimer) {
+            clearTimeout(this.inactivityTimer);
+            this.inactivityTimer = null;
+        }
+    }
+
+    handleUserActivity() {
+        this.resetInactivityTimer();
+    }
+
+    resetInactivityTimer() {
+        if (this.inactivityTimer) {
+            clearTimeout(this.inactivityTimer);
+            this.inactivityTimer = null;
+        }
+        this.inactivityTimer = setTimeout(() => {
+            this.onInactivityTimeout();
+        }, this.INACTIVITY_TIMEOUT_MS);
+    }
+
+    onInactivityTimeout() {
+        // If a search result is open or non-default state exists, reset back to base view
+        if (this.state.searchTerm || this.state.searchResult || this.state.historyModalOpen || this.state.relocateModalOpen || this.state.activeTab !== 'search') {
+            this.closeHistoryModal();
+            this.closeRelocateModal();
+            this.state.showKeypad = false;
+            this.state.activeTab = "search";
+            this.clearSearch();
+            this.loadWarehouseRacks();
+        }
+    }
+
+    /* ----------------------------------------------------
+       HELPERS & UI ACTIONS
+       ---------------------------------------------------- */
     formatTime(date) {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
@@ -74,6 +181,7 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     switchTab(tab) {
+        this.resetInactivityTimer();
         this.state.activeTab = tab;
         if (tab === "racks") {
             this.loadWarehouseRacks();
@@ -81,6 +189,7 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     toggleFullscreen() {
+        this.resetInactivityTimer();
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {});
         } else {
@@ -91,17 +200,21 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     async refreshData() {
+        this.resetInactivityTimer();
         if (this.state.searchTerm.trim()) {
             await this.executeSearch();
         }
         await this.loadWarehouseRacks();
+        this.state.lastSyncedTime = this.formatTime(new Date());
     }
 
     onSearchInput(ev) {
+        this.resetInactivityTimer();
         this.state.searchTerm = ev.target.value;
     }
 
     onSearchKeyDown(ev) {
+        this.resetInactivityTimer();
         if (ev.key === "Enter") {
             this.executeSearch();
         }
@@ -116,15 +229,18 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     quickSearch(term) {
+        this.resetInactivityTimer();
         this.state.searchTerm = term;
         this.executeSearch();
     }
 
     toggleOnScreenKeypad() {
+        this.resetInactivityTimer();
         this.state.showKeypad = !this.state.showKeypad;
     }
 
     pressKey(k) {
+        this.resetInactivityTimer();
         if (k === "BACKSPACE") {
             this.state.searchTerm = this.state.searchTerm.slice(0, -1);
         } else {
@@ -136,6 +252,7 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     async executeSearch() {
+        this.resetInactivityTimer();
         const query = this.state.searchTerm.trim();
         if (!query) {
             this.notification.add("Please enter a Docket No, Schedule No, or Rack to search.", { type: "warning" });
@@ -151,6 +268,7 @@ export class DispatchLocatorDashboard extends Component {
                 [query]
             );
             this.state.searchResult = result;
+            this.state.lastSyncedTime = this.formatTime(new Date());
         } catch (error) {
             console.error("Dispatch locator search failed:", error);
             this.notification.add("Failed to retrieve dispatch data. Please try again.", { type: "danger" });
@@ -173,6 +291,7 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     async openParcelHistory(parcelId, parcelName, parcelType = 'cut') {
+        this.resetInactivityTimer();
         this.state.currentHistoryParcelName = parcelName;
         this.state.historyModalOpen = true;
         this.state.parcelHistoryLogs = [];
@@ -190,11 +309,13 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     closeHistoryModal() {
+        this.resetInactivityTimer();
         this.state.historyModalOpen = false;
         this.state.parcelHistoryLogs = [];
     }
 
     openRelocateModal(parcelId, parcelName, currentLocationId, parcelType = 'cut') {
+        this.resetInactivityTimer();
         this.state.relocateParcelId = parcelId;
         this.state.relocateParcelName = parcelName;
         this.state.relocateParcelType = parcelType;
@@ -204,12 +325,14 @@ export class DispatchLocatorDashboard extends Component {
     }
 
     closeRelocateModal() {
+        this.resetInactivityTimer();
         this.state.relocateModalOpen = false;
         this.state.relocateParcelId = null;
         this.state.relocateParcelType = 'cut';
     }
 
     async confirmRelocate() {
+        this.resetInactivityTimer();
         if (!this.state.selectedNewLocationId) {
             this.notification.add("Please select a target Rack / Bin.", { type: "warning" });
             return;

@@ -33,8 +33,7 @@ class BrandixDocketParcelLocationHistory(models.Model):
     docket_id = fields.Many2one(
         'product.template',
         string="Docket Master",
-        related='parcel_location_id.picking_id.docket_id',
-        readonly=True
+        index=True
     )
     component_receipt_id = fields.Many2one(
         'brandix.component.receipt',
@@ -89,6 +88,8 @@ class BrandixDocketParcelLocation(models.Model):
             rec.history_count = len(rec.history_ids)
 
     def write(self, vals):
+        if self.env.context.get('skip_history_create'):
+            return super().write(vals)
         if 'location_dest_id' in vals:
             History = self.env['brandix.docket.parcel.location.history'].sudo()
             Location = self.env['stock.location'].sudo()
@@ -105,6 +106,7 @@ class BrandixDocketParcelLocation(models.Model):
                         'parcel_location_id': rec.id,
                         'parcel_number': rec.parcel_number,
                         'parcel_name': rec.parcel_name or f"Parcel #{rec.parcel_number}",
+                        'docket_id': docket.id if docket else False,
                         'old_location_id': old_loc_id,
                         'new_location_id': new_loc_id,
                         'old_location_name': old_loc_name,
@@ -146,6 +148,8 @@ class BrandixComponentReceiptLine(models.Model):
             rec.history_count = len(rec.history_ids)
 
     def write(self, vals):
+        if self.env.context.get('skip_history_create'):
+            return super().write(vals)
         if 'location_id' in vals:
             History = self.env['brandix.docket.parcel.location.history'].sudo()
             Location = self.env['stock.location'].sudo()
@@ -165,6 +169,7 @@ class BrandixComponentReceiptLine(models.Model):
                         'parcel_type': p_type,
                         'parcel_number': rec.parcel_no,
                         'parcel_name': p_name,
+                        'docket_id': rec.receipt_id.docket_id.id if rec.receipt_id and rec.receipt_id.docket_id else False,
                         'old_location_id': old_loc_id,
                         'new_location_id': new_loc_id,
                         'old_location_name': old_loc_name,
