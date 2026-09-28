@@ -63,7 +63,7 @@
                 <field name="picking_id"/>
                 <field name="new_location_name"/>
                 <field name="user_id"/>
-                <group expand="0" string="Group By">
+                <group>
                     <filter string="Docket" name="group_docket" domain="[]" context="{'group_by':'docket_id'}"/>
                     <filter string="New Rack/Bin" name="group_new_loc" domain="[]" context="{'group_by':'new_location_id'}"/>
                     <filter string="Changed By" name="group_user" domain="[]" context="{'group_by':'user_id'}"/>
