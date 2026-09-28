@@ -1,6 +1,6 @@
 {
     'name': 'Brandix Dispatch Locator & Parcel Rack Map',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.0.2',
     'summary': 'Smart Board Dispatch & Parcel Locator with Real-Time Component Readiness and Rack History',
     'description': """
 Brandix Dispatch Locator & Rack Map Dashboard (Odoo 19)

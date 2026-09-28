@@ -15,12 +15,14 @@ class BrandixDocketParcelLocationHistory(models.Model):
     picking_id = fields.Many2one(
         'stock.picking',
         string="Docket GRN",
-        index=True
+        related='parcel_location_id.picking_id',
+        readonly=True
     )
     docket_id = fields.Many2one(
         'product.template',
         string="Docket Master",
-        index=True
+        related='parcel_location_id.picking_id.docket_id',
+        readonly=True
     )
     parcel_number = fields.Integer(string="Parcel #")
     parcel_name = fields.Char(string="Parcel Name")
@@ -83,8 +85,6 @@ class BrandixDocketParcelLocation(models.Model):
                     docket = rec.picking_id.docket_id if rec.picking_id else False
                     History.create({
                         'parcel_location_id': rec.id,
-                        'picking_id': rec.picking_id.id if rec.picking_id else False,
-                        'docket_id': docket.id if docket else False,
                         'parcel_number': rec.parcel_number,
                         'parcel_name': rec.parcel_name or f"Parcel #{rec.parcel_number}",
                         'old_location_id': old_loc_id,
