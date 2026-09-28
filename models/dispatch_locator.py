@@ -269,33 +269,36 @@ class BrandixDispatchLocator(models.TransientModel):
             'parcels': emb_parcels,
         }
 
+        # Check pending items for this docket
+        pending_items = []
+        if not parcels_data:
+            pending_items.append("Cut Parcels")
+        if not trims_info['is_ready']:
+            pending_items.append("Trims")
+        if is_emb and not emb_info['is_ready']:
+            pending_items.append("Embellishment")
+
         # 5. Master Dispatch Decision (Traffic Light)
-        if docket.delivery_status == 'done':
+        if getattr(docket, 'delivery_status', 'pending') == 'done':
             decision = {
                 'can_issue': False,
                 'state': 'already_dispatched',
                 'color': 'blue',
                 'badge_class': 'decision-dispatched bg-primary text-white',
                 'banner_title': _("ALREADY DISPATCHED TO SEWING LINE"),
-                'banner_subtitle': _("This Docket has already been fully issued and sent out to the sewing floor.")
+                'banner_subtitle': _("This Docket has already been fully issued and sent out to the sewing floor."),
+                'pending_items': [],
             }
-        elif not trims_info['is_ready']:
+        elif pending_items:
+            pending_desc = ", ".join(f"{item} Pending" for item in pending_items)
             decision = {
                 'can_issue': False,
-                'state': 'blocked_trims',
+                'state': 'not_completed',
                 'color': 'red',
                 'badge_class': 'decision-blocked bg-danger text-white',
-                'banner_title': _("DO NOT ISSUE - TRIMS PENDING!"),
-                'banner_subtitle': _("Required Trims components have not been received in store yet.")
-            }
-        elif is_emb and not emb_info['is_ready']:
-            decision = {
-                'can_issue': False,
-                'state': 'blocked_emb',
-                'color': 'red',
-                'badge_class': 'decision-blocked bg-danger text-white',
-                'banner_title': _("DO NOT ISSUE - EMBELLISHMENT PENDING!"),
-                'banner_subtitle': _("Insufficient EMB pool balance for this schedule. Cannot dispatch until received.")
+                'banner_title': _("DO NOT ISSUE - DOCKET NOT COMPLETED!"),
+                'banner_subtitle': _("Pending: %s") % pending_desc,
+                'pending_items': [f"{item} Pending" for item in pending_items],
             }
         else:
             decision = {
@@ -304,7 +307,8 @@ class BrandixDispatchLocator(models.TransientModel):
                 'color': 'green',
                 'badge_class': 'decision-ready bg-success text-white',
                 'banner_title': _("ALL COMPONENTS READY - CAN ISSUE TO LINE!"),
-                'banner_subtitle': _("All Cut Parcels, Trims, and Embellishments are verified and available.")
+                'banner_subtitle': _("All Cut Parcels, Trims, and Embellishments are verified and available."),
+                'pending_items': [],
             }
 
         return {

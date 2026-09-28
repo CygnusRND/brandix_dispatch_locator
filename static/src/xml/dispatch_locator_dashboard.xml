@@ -147,7 +147,19 @@
                                 </t>
                                 <div class="text-start">
                                     <h1 class="display-5 fw-black mb-1" t-esc="res.decision.banner_title"></h1>
-                                    <p class="fs-4 mb-0 opacity-90" t-esc="res.decision.banner_subtitle"></p>
+                                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                                        <t t-if="res.decision.pending_items and res.decision.pending_items.length">
+                                            <span class="fs-4 opacity-90 me-1">Pending:</span>
+                                            <t t-foreach="res.decision.pending_items" t-as="p_item" t-key="p_item">
+                                                <span class="badge bg-white text-danger fs-5 fw-bold px-3 py-1 shadow-sm">
+                                                    <i class="fa fa-clock-o me-1 text-danger"></i> <t t-esc="p_item"/>
+                                                </span>
+                                            </t>
+                                        </t>
+                                        <t t-else="">
+                                            <p class="fs-4 mb-0 opacity-90" t-esc="res.decision.banner_subtitle"></p>
+                                        </t>
+                                    </div>
                                 </div>
                             </div>
                         </div>
