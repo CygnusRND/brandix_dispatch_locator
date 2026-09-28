@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Client Action for Smart Board Dispatch Locator Dashboard -->
+    <record id="action_brandix_dispatch_locator_dashboard" model="ir.actions.client">
+        <field name="name">Smart Board Dispatch Locator</field>
+        <field name="tag">brandix_dispatch_locator_dashboard</field>
+        <field name="target">main</field>
+    </record>
+</odoo>

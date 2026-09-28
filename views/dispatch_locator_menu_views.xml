@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Top-Level Root Menu on Odoo App Switcher / Home Menu -->
+    <menuitem id="menu_brandix_dispatch_locator_root"
+              name="Dispatch Locator"
+              action="action_brandix_dispatch_locator_dashboard"
+              web_icon="brandix_dispatch_locator,static/description/icon.png"
+              sequence="12"/>
+
+    <!-- Sub-menus for direct navigation -->
+    <menuitem id="menu_brandix_dispatch_locator_dashboard"
+              name="Smart Board Locator"
+              parent="menu_brandix_dispatch_locator_root"
+              action="action_brandix_dispatch_locator_dashboard"
+              sequence="1"/>
+
+    <menuitem id="menu_brandix_parcel_location_history_nav"
+              name="Parcel Movement Logs"
+              parent="menu_brandix_dispatch_locator_root"
+              action="action_brandix_parcel_location_history"
+              sequence="2"/>
+</odoo>

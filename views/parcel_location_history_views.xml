@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Parcel Location History List View -->
+    <record id="view_brandix_docket_parcel_location_history_tree" model="ir.ui.view">
+        <field name="name">brandix.docket.parcel.location.history.list</field>
+        <field name="model">brandix.docket.parcel.location.history</field>
+        <field name="arch" type="xml">
+            <list string="Parcel Location Audit Trail" create="false" edit="false" delete="false">
+                <field name="change_date"/>
+                <field name="parcel_name"/>
+                <field name="docket_id"/>
+                <field name="picking_id"/>
+                <field name="old_location_name"/>
+                <field name="new_location_name"/>
+                <field name="user_id" widget="many2one_avatar_user"/>
+                <field name="notes"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Parcel Location History Form View -->
+    <record id="view_brandix_docket_parcel_location_history_form" model="ir.ui.view">
+        <field name="name">brandix.docket.parcel.location.history.form</field>
+        <field name="model">brandix.docket.parcel.location.history</field>
+        <field name="arch" type="xml">
+            <form string="Parcel Location Movement Log" create="false" edit="false" delete="false">
+                <sheet>
+                    <div class="oe_title">
+                        <label for="parcel_name" string="Parcel Name"/>
+                        <h1><field name="parcel_name" readonly="1"/></h1>
+                    </div>
+                    <group>
+                        <group string="Movement Details">
+                            <field name="old_location_id" readonly="1"/>
+                            <field name="old_location_name" readonly="1"/>
+                            <field name="new_location_id" readonly="1"/>
+                            <field name="new_location_name" readonly="1"/>
+                        </group>
+                        <group string="Audit Information">
+                            <field name="change_date" readonly="1"/>
+                            <field name="user_id" readonly="1"/>
+                            <field name="notes" readonly="1"/>
+                        </group>
+                    </group>
+                    <group string="Associated Records">
+                        <field name="docket_id" readonly="1"/>
+                        <field name="picking_id" readonly="1"/>
+                        <field name="parcel_location_id" readonly="1"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Parcel Location History Search View -->
+    <record id="view_brandix_docket_parcel_location_history_search" model="ir.ui.view">
+        <field name="name">brandix.docket.parcel.location.history.search</field>
+        <field name="model">brandix.docket.parcel.location.history</field>
+        <field name="arch" type="xml">
+            <search string="Search Location Audit History">
+                <field name="parcel_name"/>
+                <field name="docket_id"/>
+                <field name="picking_id"/>
+                <field name="new_location_name"/>
+                <field name="user_id"/>
+                <group expand="0" string="Group By">
+                    <filter string="Docket" name="group_docket" domain="[]" context="{'group_by':'docket_id'}"/>
+                    <filter string="New Rack/Bin" name="group_new_loc" domain="[]" context="{'group_by':'new_location_id'}"/>
+                    <filter string="Changed By" name="group_user" domain="[]" context="{'group_by':'user_id'}"/>
+                    <filter string="Change Date" name="group_date" domain="[]" context="{'group_by':'change_date:day'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Action for Location Audit Trail -->
+    <record id="action_brandix_parcel_location_history" model="ir.actions.act_window">
+        <field name="name">Parcel Location Audit Trail</field>
+        <field name="res_model">brandix.docket.parcel.location.history</field>
+        <field name="view_mode">list,form</field>
+        <field name="context">{}</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No location movement logs yet!
+            </p>
+            <p>
+                Whenever a parcel's destination rack/bin is modified, a record is automatically captured here.
+            </p>
+        </field>
+    </record>
+</odoo>

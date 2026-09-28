@@ -1,0 +1,610 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="brandix_dispatch_locator.Dashboard">
+        <div class="brandix-dispatch-dashboard-container d-flex flex-column h-100 w-100">
+            
+            <!-- TOP BAR / HEADER -->
+            <header class="dashboard-header d-flex justify-content-between align-items-center px-4 py-3 shadow-sm">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="brand-badge px-3 py-2 rounded-3 text-white fw-bold d-flex align-items-center gap-2">
+                        <i class="fa fa-crosshairs fa-lg"></i>
+                        <span class="fs-4 tracking-wide">BRANDIX DISPATCH LOCATOR</span>
+                    </div>
+                    <span class="badge bg-dark-subtle text-dark border px-3 py-2 fs-6 rounded-pill">
+                        <i class="fa fa-television me-1 text-primary"></i> Smart Board Terminal
+                    </span>
+                </div>
+
+                <div class="d-flex align-items-center gap-3">
+                    <!-- Clock & Date -->
+                    <div class="clock-display text-end pe-3 border-end">
+                        <div class="fs-4 fw-bold text-dark font-monospace" t-esc="state.currentTime"></div>
+                        <div class="small text-muted fw-semibold" t-esc="state.currentDate"></div>
+                    </div>
+
+                    <!-- Mode Toggle Buttons -->
+                    <div class="btn-group shadow-sm">
+                        <button class="btn btn-lg fw-bold"
+                                t-att-class="state.activeTab === 'search' ? 'btn-primary' : 'btn-outline-secondary bg-white'"
+                                t-on-click="() => this.switchTab('search')">
+                            <i class="fa fa-search me-2"></i> Docket / Schedule Search
+                        </button>
+                        <button class="btn btn-lg fw-bold"
+                                t-att-class="state.activeTab === 'racks' ? 'btn-primary' : 'btn-outline-secondary bg-white'"
+                                t-on-click="() => this.switchTab('racks')">
+                            <i class="fa fa-th-large me-2"></i> Warehouse Racks Map
+                        </button>
+                    </div>
+
+                    <!-- Fullscreen & Refresh -->
+                    <button class="btn btn-outline-dark btn-lg shadow-sm" t-on-click="toggleFullscreen" title="Toggle Fullscreen">
+                        <i class="fa fa-arrows-alt"></i>
+                    </button>
+                    <button class="btn btn-outline-primary btn-lg shadow-sm" t-on-click="refreshData" title="Refresh">
+                        <i class="fa fa-refresh" t-att-class="{'fa-spin': state.loading}"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- MAIN BODY -->
+            <main class="dashboard-body flex-grow-1 p-4 overflow-auto">
+
+                <!-- TAB 1: SEARCH & DISPATCH VERIFIER -->
+                <t t-if="state.activeTab === 'search'">
+                    <!-- SEARCH INPUT SECTION -->
+                    <div class="search-hero-card p-4 rounded-4 shadow-sm mb-4 bg-white border">
+                        <div class="row align-items-center g-3">
+                            <div class="col-md-9 col-lg-10">
+                                <div class="input-group input-group-lg search-input-group shadow-sm">
+                                    <span class="input-group-text bg-light border-2 px-4 text-primary">
+                                        <i class="fa fa-barcode fa-2x"></i>
+                                    </span>
+                                    <input type="text"
+                                           class="form-control form-control-lg fs-3 fw-bold py-3 text-uppercase font-monospace border-2"
+                                           placeholder="SCAN OR TYPE DOCKET NO / SCHEDULE NO / RACK..."
+                                           t-ref="searchInput"
+                                           t-att-value="state.searchTerm"
+                                           t-on-input="onSearchInput"
+                                           t-on-keydown="onSearchKeyDown"/>
+                                    <t t-if="state.searchTerm">
+                                        <button class="btn btn-outline-secondary border-2 px-3" t-on-click="clearSearch">
+                                            <i class="fa fa-times fa-lg"></i>
+                                        </button>
+                                    </t>
+                                </div>
+                            </div>
+                            <div class="col-md-3 col-lg-2 d-grid">
+                                <button class="btn btn-primary btn-lg fs-4 fw-bold py-3 shadow"
+                                        t-on-click="executeSearch"
+                                        t-att-disabled="state.loading">
+                                    <i class="fa fa-search me-2"></i> SEARCH
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Touch Quick Numpad Toggle -->
+                        <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
+                            <div class="d-flex gap-2 align-items-center">
+                                <span class="text-muted small fw-semibold">Quick Search:</span>
+                                <button class="btn btn-sm btn-outline-primary rounded-pill px-3" t-on-click="() => this.quickSearch('JG5-J:856194-000')">JG5-J:856194-000</button>
+                                <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" t-on-click="() => this.quickSearch('1384507')">Schedule 1384507</button>
+                                <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" t-on-click="() => this.quickSearch('1380999')">Schedule 1380999</button>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-light border text-dark fw-semibold" t-on-click="toggleOnScreenKeypad">
+                                    <i class="fa fa-keyboard-o me-1"></i> <t t-esc="state.showKeypad ? 'Hide On-Screen Pad' : 'Show Touch Pad'"/>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ON-SCREEN KEYPAD (For touch terminals without physical keyboard) -->
+                        <t t-if="state.showKeypad">
+                            <div class="onscreen-keypad mt-3 p-3 bg-light rounded-3 border text-center">
+                                <div class="d-flex flex-wrap justify-content-center gap-2 mb-2">
+                                    <t t-foreach="['1','2','3','4','5','6','7','8','9','0','-','JG5-J:']" t-as="k" t-key="k">
+                                        <button class="btn btn-outline-dark fs-4 fw-bold px-3 py-2 key-btn" t-on-click="() => this.pressKey(k)" t-esc="k"></button>
+                                    </t>
+                                    <button class="btn btn-danger fs-4 fw-bold px-3 py-2" t-on-click="() => this.pressKey('BACKSPACE')">⌫ Del</button>
+                                </div>
+                            </div>
+                        </t>
+                    </div>
+
+                    <!-- LOADING SPINNER -->
+                    <t t-if="state.loading">
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-primary" style="width: 4rem; height: 4rem;" role="status"></div>
+                            <h3 class="mt-3 text-muted fw-bold">Locating items and querying warehouse components...</h3>
+                        </div>
+                    </t>
+
+                    <!-- ERROR / NOT FOUND -->
+                    <t t-elif="state.searchResult and state.searchResult.status === 'not_found'">
+                        <div class="alert alert-warning p-4 rounded-4 shadow-sm text-center">
+                            <i class="fa fa-exclamation-triangle fa-3x text-warning mb-3"></i>
+                            <h2 class="fw-bold" t-esc="state.searchResult.message"></h2>
+                            <p class="fs-5 text-muted">Please check the Docket or Schedule number on the sheet and try again.</p>
+                        </div>
+                    </t>
+
+                    <!-- RESULT TYPE 1: DOCKET DETAILS -->
+                    <t t-elif="state.searchResult and state.searchResult.query_type === 'docket'">
+                        <t t-set="res" t-value="state.searchResult"/>
+                        
+                        <!-- MASTER READINESS DECISION BANNER (Huge Smart Board Header) -->
+                        <div class="dispatch-decision-banner p-4 rounded-4 shadow-lg mb-4 text-center text-white"
+                             t-att-class="res.decision.badge_class">
+                            <div class="d-flex justify-content-center align-items-center gap-3">
+                                <t t-if="res.decision.can_issue">
+                                    <i class="fa fa-check-circle fa-4x"></i>
+                                </t>
+                                <t t-elif="res.decision.state === 'already_dispatched'">
+                                    <i class="fa fa-truck fa-4x"></i>
+                                </t>
+                                <t t-else="">
+                                    <i class="fa fa-ban fa-4x"></i>
+                                </t>
+                                <div class="text-start">
+                                    <h1 class="display-5 fw-black mb-1" t-esc="res.decision.banner_title"></h1>
+                                    <p class="fs-4 mb-0 opacity-90" t-esc="res.decision.banner_subtitle"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- JOB DETAILS CARD -->
+                        <div class="card border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
+                            <div class="card-header bg-dark text-white px-4 py-3 d-flex justify-content-between align-items-center">
+                                <span class="fs-4 fw-bold">
+                                    <i class="fa fa-id-card me-2 text-info"></i> JOB DETAILS : <span class="text-warning font-monospace" t-esc="res.job.docket_no"></span>
+                                </span>
+                                <span class="badge fs-6 px-3 py-2 rounded-pill"
+                                      t-att-class="res.job.is_label_printed ? 'bg-success' : 'bg-warning text-dark'">
+                                    <i class="fa fa-tag me-1"></i> <t t-esc="res.job.is_label_printed ? 'Label Printed' : 'Label Unprinted'"/>
+                                </span>
+                            </div>
+                            <div class="card-body p-4 bg-white">
+                                <div class="row g-4 text-center text-md-start">
+                                    <div class="col-6 col-md-4 col-lg-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Schedule No</span>
+                                        <span class="fs-3 fw-black text-dark font-monospace" t-esc="res.job.schedule_no"></span>
+                                    </div>
+                                    <div class="col-6 col-md-4 col-lg-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Style Code</span>
+                                        <span class="fs-3 fw-bold text-dark" t-esc="res.job.style_code"></span>
+                                    </div>
+                                    <div class="col-6 col-md-4 col-lg-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Buyer / Customer</span>
+                                        <span class="fs-4 fw-bold text-dark text-truncate d-block" t-esc="res.job.buyer_customer"></span>
+                                    </div>
+                                    <div class="col-6 col-md-4 col-lg-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Colourway</span>
+                                        <span class="fs-5 fw-bold text-dark text-truncate d-block" t-esc="res.job.color_name"></span>
+                                    </div>
+                                    <div class="col-6 col-md-4 col-lg-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Module (FR)</span>
+                                        <span class="badge bg-info-subtle text-info fs-4 fw-bold px-3 py-2 rounded-3" t-esc="res.job.module_fr"></span>
+                                    </div>
+                                    <div class="col-6 col-md-4 col-lg-2 text-center">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Order Qty</span>
+                                        <span class="fs-2 fw-black text-success" t-esc="res.job.co_qty"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- PANEL CUT PARCELS LOCATION (SCRATCH LAYOUT ADAPTATION) -->
+                        <div class="card border-0 shadow-sm rounded-4 mb-4">
+                            <div class="card-header bg-primary text-white px-4 py-3 d-flex justify-content-between align-items-center">
+                                <span class="fs-4 fw-bold">
+                                    <i class="fa fa-cubes me-2"></i> CUT PANEL PARCELS &amp; PHYSICAL RACK STORAGE
+                                </span>
+                                <span class="badge bg-white text-primary fs-6 px-3 py-2 fw-bold rounded-pill">
+                                    <t t-esc="res.parcels.length"/> Total Parcels
+                                </span>
+                            </div>
+                            <div class="card-body p-4 bg-light">
+                                <t t-if="res.parcels.length === 0">
+                                    <div class="alert alert-info fs-4 p-4 text-center">
+                                        <i class="fa fa-info-circle me-2"></i> No parcel destination locations registered yet for this Docket GRN.
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="row g-4">
+                                        <t t-foreach="res.parcels" t-as="p" t-key="p.id">
+                                            <div class="col-md-6 col-lg-4">
+                                                <div class="parcel-rack-box p-4 rounded-4 shadow-sm border-3 bg-white text-center position-relative h-100 d-flex flex-column justify-content-between">
+                                                    <!-- Parcel Name Badge -->
+                                                    <div class="mb-2">
+                                                        <span class="badge bg-secondary-subtle text-secondary fs-5 px-3 py-1 rounded-pill fw-bold" t-esc="p.parcel_name"></span>
+                                                    </div>
+
+                                                    <!-- Physical Location Name (Huge Rack/Bin font) -->
+                                                    <div class="my-3">
+                                                        <div class="text-muted small fw-bold text-uppercase mb-1">Assigned Storage Rack</div>
+                                                        <div class="rack-title display-6 fw-black text-primary font-monospace py-2 px-3 bg-primary-subtle rounded-3 border"
+                                                             t-esc="p.location_name"></div>
+                                                        <div class="text-muted small mt-1" t-esc="p.location_full_name"></div>
+                                                    </div>
+
+                                                    <!-- Audit History & Relocate buttons -->
+                                                    <div class="d-flex justify-content-between align-items-center pt-3 border-top mt-2">
+                                                        <button class="btn btn-sm btn-outline-info rounded-pill px-3"
+                                                                t-on-click="() => this.openParcelHistory(p.id, p.parcel_name)">
+                                                            <i class="fa fa-history me-1"></i> Movement Log (<t t-esc="p.history_count"/>)
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                                t-on-click="() => this.openRelocateModal(p.id, p.parcel_name, p.location_id)">
+                                                            <i class="fa fa-arrows me-1"></i> Move Rack
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </t>
+                                    </div>
+                                </t>
+                            </div>
+                        </div>
+
+                        <!-- COMPONENT STATUS CARDS (TRIMS & EMBELLISHMENTS) -->
+                        <div class="row g-4 mb-4">
+                            <!-- TRIMS CARD -->
+                            <div class="col-md-6">
+                                <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden">
+                                    <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center"
+                                         t-att-class="res.trims.is_ready ? 'bg-success text-white' : 'bg-danger text-white'">
+                                        <span class="fs-4 fw-bold">
+                                            <i class="fa fa-scissors me-2"></i> TRIMS COMPONENTS
+                                        </span>
+                                        <span class="badge bg-white fs-6 px-3 py-2 rounded-pill fw-bold"
+                                              t-att-class="res.trims.is_ready ? 'text-success' : 'text-danger'">
+                                            <t t-if="res.trims.is_already_issued">CARRIER ISSUED</t>
+                                            <t t-elif="res.trims.is_carrier">CARRIER DOCKET</t>
+                                            <t t-elif="res.trims.is_ready">READY</t>
+                                            <t t-else="">PENDING</t>
+                                        </span>
+                                    </div>
+                                    <div class="card-body p-4 bg-white fs-5">
+                                        <t t-if="res.trims.is_already_issued">
+                                            <div class="alert alert-info p-3 rounded-3 mb-3">
+                                                <i class="fa fa-check-circle text-success me-2"></i>
+                                                <strong>Already Dispatched!</strong> Trims for this schedule were dispatched with carrier docket:
+                                                <div class="fs-4 fw-bold text-primary mt-1 font-monospace" t-esc="res.trims.carrier_docket"></div>
+                                                <t t-if="res.trims.issued_date">
+                                                    <small class="text-muted d-block mt-1">Dispatched On: <t t-esc="res.trims.issued_date"/></small>
+                                                </t>
+                                            </div>
+                                        </t>
+                                        <t t-elif="res.trims.is_carrier">
+                                            <div class="alert alert-success p-3 rounded-3 mb-3">
+                                                <i class="fa fa-star text-warning me-2"></i>
+                                                <strong>This is the Carrier Docket!</strong> Dispatches all trims for this schedule.
+                                            </div>
+                                        </t>
+                                        <t t-else="">
+                                            <div class="alert alert-warning p-3 rounded-3 mb-3">
+                                                <i class="fa fa-clock-o me-2"></i> Trims receipt is pending in store.
+                                            </div>
+                                        </t>
+
+                                        <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                                            <span class="text-muted fw-semibold">Storage Bin / Rack:</span>
+                                            <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.trims.location_name"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- EMBELLISHMENT (EMB) CARD -->
+                            <div class="col-md-6">
+                                <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden">
+                                    <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center"
+                                         t-att-class="res.emb.is_ready ? 'bg-success text-white' : 'bg-danger text-white'">
+                                        <span class="fs-4 fw-bold">
+                                            <i class="fa fa-paint-brush me-2"></i> EMBELLISHMENT (EMB)
+                                        </span>
+                                        <span class="badge bg-white fs-6 px-3 py-2 rounded-pill fw-bold"
+                                              t-att-class="res.emb.is_ready ? 'text-success' : 'text-danger'">
+                                            <t t-if="!res.emb.is_emb_style">NON-EMB</t>
+                                            <t t-elif="res.emb.is_ready">POOL READY</t>
+                                            <t t-else="">POOL INSUFFICIENT</t>
+                                        </span>
+                                    </div>
+                                    <div class="card-body p-4 bg-white fs-5">
+                                        <t t-if="!res.emb.is_emb_style">
+                                            <div class="alert alert-secondary p-3 rounded-3 mb-3 text-center">
+                                                <i class="fa fa-info-circle me-2"></i> Non-Embellishment style. No EMB components required.
+                                            </div>
+                                        </t>
+                                        <t t-else="">
+                                            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                                                <span class="text-muted fw-semibold">Schedule EMB Pool Balance:</span>
+                                                <span class="fw-bold fs-4 text-primary" t-esc="res.emb.pool_balance"></span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                                                <span class="text-muted fw-semibold">Total EMB Received:</span>
+                                                <span class="fw-bold fs-4 text-dark" t-esc="res.emb.pool_received"></span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center py-2">
+                                                <span class="text-muted fw-semibold">EMB Storage Rack / Bin:</span>
+                                                <span class="fw-bold fs-4 text-dark font-monospace" t-esc="res.emb.location_name"></span>
+                                            </div>
+                                        </t>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </t>
+
+                    <!-- RESULT TYPE 2: SCHEDULE MULTI-DOCKET VIEW -->
+                    <t t-elif="state.searchResult and state.searchResult.query_type === 'schedule'">
+                        <t t-set="sres" t-value="state.searchResult"/>
+                        
+                        <!-- SCHEDULE SUMMARY BANNER -->
+                        <div class="card border-0 shadow-sm rounded-4 mb-4 overflow-hidden">
+                            <div class="card-header bg-indigo text-white px-4 py-3 d-flex justify-content-between align-items-center">
+                                <span class="fs-3 fw-bold">
+                                    <i class="fa fa-calendar me-2"></i> SCHEDULE MASTER : <span class="text-warning font-monospace" t-esc="sres.schedule.schedule_no"></span>
+                                </span>
+                                <div class="d-flex gap-2">
+                                    <span class="badge bg-success fs-5 px-3 py-2 rounded-pill">
+                                        <t t-esc="sres.schedule.ready_dockets_count"/> / <t t-esc="sres.schedule.total_dockets_count"/> Dockets Ready
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="card-body p-4 bg-white">
+                                <div class="row g-4">
+                                    <div class="col-md-3 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Style Code</span>
+                                        <span class="fs-4 fw-bold text-dark" t-esc="sres.schedule.style_code"></span>
+                                    </div>
+                                    <div class="col-md-3 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Buyer / Customer</span>
+                                        <span class="fs-4 fw-bold text-dark" t-esc="sres.schedule.buyer_customer"></span>
+                                    </div>
+                                    <div class="col-md-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Total Qty</span>
+                                        <span class="fs-3 fw-black text-success" t-esc="sres.schedule.co_qty"></span>
+                                    </div>
+                                    <div class="col-md-2 border-end">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">Trims Status</span>
+                                        <span class="badge fs-5 px-3 py-2 rounded-3"
+                                              t-att-class="sres.schedule.trims_status === 'issued' ? 'bg-success' : 'bg-warning text-dark'">
+                                            <t t-esc="sres.schedule.trims_status"/>
+                                        </span>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <span class="text-muted small fw-bold d-block text-uppercase">EMB Pool Balance</span>
+                                        <span class="fs-3 fw-black text-primary" t-esc="sres.schedule.emb_pool_balance"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DOCKETS GRID UNDER THIS SCHEDULE -->
+                        <h3 class="fw-bold mb-3 text-dark"><i class="fa fa-list-ol me-2 text-primary"></i> Dockets In This Schedule</h3>
+                        <div class="row g-4">
+                            <t t-foreach="sres.dockets" t-as="d" t-key="d.docket_id">
+                                <div class="col-md-6 col-lg-4">
+                                    <div class="card h-100 border-2 shadow-sm rounded-4 cursor-pointer docket-card-item transition-all"
+                                         t-att-class="d.can_issue ? 'border-success' : 'border-danger'"
+                                         t-on-click="() => this.quickSearch(d.docket_no)">
+                                        <div class="card-header px-4 py-3 d-flex justify-content-between align-items-center"
+                                             t-att-class="d.can_issue ? 'bg-success text-white' : 'bg-danger text-white'">
+                                            <span class="fs-5 fw-bold font-monospace" t-esc="d.docket_no"></span>
+                                            <span class="badge bg-white fs-6 px-2 py-1 rounded-pill"
+                                                  t-att-class="d.can_issue ? 'text-success' : 'text-danger'">
+                                                <t t-esc="d.can_issue ? 'CAN ISSUE' : 'BLOCKED'"/>
+                                            </span>
+                                        </div>
+                                        <div class="card-body p-3 bg-white">
+                                            <div class="d-flex justify-content-between mb-2">
+                                                <span class="text-muted">Module (FR):</span>
+                                                <span class="fw-bold text-info" t-esc="d.module_fr"></span>
+                                            </div>
+                                            <div class="d-flex justify-content-between mb-3">
+                                                <span class="text-muted">Quantity:</span>
+                                                <span class="fw-bold text-success fs-5" t-esc="d.co_qty"></span>
+                                            </div>
+
+                                            <!-- Parcel Locations Pills -->
+                                            <div class="border-top pt-2">
+                                                <span class="text-muted small fw-bold d-block mb-1">RACK LOCATIONS:</span>
+                                                <div class="d-flex flex-wrap gap-1">
+                                                    <t t-foreach="d.parcels" t-as="dp" t-key="dp.id">
+                                                        <span class="badge bg-light text-dark border font-monospace px-2 py-1">
+                                                            <t t-esc="dp.parcel_name"/>: <strong class="text-primary" t-esc="dp.location_name"/>
+                                                        </span>
+                                                    </t>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="card-footer bg-light text-center py-2 small fw-bold text-primary">
+                                            Click to inspect full details <i class="fa fa-arrow-right ms-1"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </t>
+                        </div>
+                    </t>
+
+                    <!-- RESULT TYPE 3: LOCATION / RACK DETAIL VIEW -->
+                    <t t-elif="state.searchResult and state.searchResult.query_type === 'location'">
+                        <t t-set="lres" t-value="state.searchResult"/>
+                        
+                        <div class="card border-0 shadow-sm rounded-4 mb-4">
+                            <div class="card-header bg-dark text-white px-4 py-3 d-flex justify-content-between align-items-center">
+                                <span class="fs-3 fw-bold">
+                                    <i class="fa fa-map-marker me-2 text-warning"></i> RACK / BIN : <span class="text-warning font-monospace" t-esc="lres.location.name"></span>
+                                </span>
+                                <span class="badge bg-primary fs-5 px-3 py-2 rounded-pill">
+                                    <t t-esc="lres.location.total_items"/> Parcels Stored
+                                </span>
+                            </div>
+                            <div class="card-body p-4 bg-white">
+                                <t t-if="lres.items.length === 0">
+                                    <div class="alert alert-secondary fs-4 text-center p-4">
+                                        <i class="fa fa-info-circle me-2"></i> This rack is currently empty.
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="table-responsive">
+                                        <table class="table table-hover table-striped align-middle fs-5">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Parcel Identifier</th>
+                                                    <th>Docket Number</th>
+                                                    <th>Schedule</th>
+                                                    <th>Style</th>
+                                                    <th>Color</th>
+                                                    <th>GRN Ref</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <t t-foreach="lres.items" t-as="item" t-key="item.parcel_id">
+                                                    <tr>
+                                                        <td class="fw-bold text-primary" t-esc="item.parcel_name"></td>
+                                                        <td class="fw-bold font-monospace" t-esc="item.docket_no"></td>
+                                                        <td t-esc="item.schedule_no"></td>
+                                                        <td t-esc="item.style_code"></td>
+                                                        <td t-esc="item.color_name"></td>
+                                                        <td class="text-muted small" t-esc="item.grn_name"></td>
+                                                        <td>
+                                                            <button class="btn btn-sm btn-outline-primary rounded-pill px-3"
+                                                                    t-on-click="() => this.quickSearch(item.docket_no)">
+                                                                View Docket
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                </t>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </t>
+                            </div>
+                        </div>
+                    </t>
+                </t>
+
+                <!-- TAB 2: WAREHOUSE RACKS MAP (GRID VIEW MATCHING USER SCRATCH) -->
+                <t t-elif="state.activeTab === 'racks'">
+                    <div class="racks-map-container">
+                        <div class="d-flex justify-content-between align-items-center mb-4">
+                            <div>
+                                <h2 class="fw-bold mb-1"><i class="fa fa-th text-primary me-2"></i> Physical Warehouse Racks &amp; Bins Map</h2>
+                                <p class="text-muted fs-5 mb-0">Touch any Rack to inspect which Parcels and Dockets are stored inside.</p>
+                            </div>
+                            <div class="d-flex gap-3 align-items-center">
+                                <span class="badge bg-success fs-6 px-3 py-2 rounded-pill">Active Storage</span>
+                                <span class="badge bg-secondary fs-6 px-3 py-2 rounded-pill">Empty Racks</span>
+                            </div>
+                        </div>
+
+                        <div class="row g-4">
+                            <t t-foreach="state.warehouseRacks" t-as="rack" t-key="rack.id">
+                                <div class="col-6 col-md-4 col-lg-3 col-xl-2">
+                                    <div class="rack-card-box p-4 rounded-4 shadow-sm text-center cursor-pointer border-3 transition-all h-100 d-flex flex-column justify-content-between"
+                                         t-att-class="rack.active_parcel_count > 0 ? 'bg-primary-subtle border-primary text-primary' : 'bg-light border-secondary text-secondary'"
+                                         t-on-click="() => this.quickSearch(rack.name)">
+                                        <div>
+                                            <i class="fa fa-cubes fa-2x mb-2"></i>
+                                            <div class="rack-name display-6 fw-black font-monospace" t-esc="rack.name"></div>
+                                        </div>
+                                        <div class="mt-3">
+                                            <span class="badge fs-5 px-3 py-2 rounded-pill shadow-sm"
+                                                  t-att-class="rack.active_parcel_count > 0 ? 'bg-primary text-white' : 'bg-secondary text-white'">
+                                                <t t-esc="rack.active_parcel_count"/> Parcels
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </t>
+                        </div>
+                    </div>
+                </t>
+
+            </main>
+
+            <!-- MODAL: PARCEL MOVEMENT HISTORY (AUDIT TRAIL) -->
+            <t t-if="state.historyModalOpen">
+                <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.65);" role="dialog">
+                    <div class="modal-dialog modal-dialog-centered modal-lg">
+                        <div class="modal-content rounded-4 shadow-lg border-0 overflow-hidden">
+                            <div class="modal-header bg-dark text-white px-4 py-3">
+                                <h4 class="modal-title fw-bold">
+                                    <i class="fa fa-history text-info me-2"></i> Movement Log: <span class="text-warning" t-esc="state.currentHistoryParcelName"></span>
+                                </h4>
+                                <button type="button" class="btn-close btn-close-white" t-on-click="closeHistoryModal"></button>
+                            </div>
+                            <div class="modal-body p-4 bg-light fs-5">
+                                <t t-if="state.parcelHistoryLogs.length === 0">
+                                    <div class="alert alert-secondary text-center p-4">
+                                        <i class="fa fa-check-circle text-success me-2"></i> No location transfers recorded. Parcel remains in its initial GRN location.
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="timeline-container">
+                                        <t t-foreach="state.parcelHistoryLogs" t-as="log" t-key="log.id">
+                                            <div class="timeline-item p-3 mb-3 bg-white rounded-3 shadow-sm border-start border-4 border-info">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <span class="fw-bold text-dark font-monospace">
+                                                        <span class="badge bg-secondary me-2"><t t-esc="log.old_location"/></span>
+                                                        <i class="fa fa-long-arrow-right text-primary me-2"></i>
+                                                        <span class="badge bg-primary fs-6"><t t-esc="log.new_location"/></span>
+                                                    </span>
+                                                    <small class="text-muted" t-esc="log.change_date"></small>
+                                                </div>
+                                                <div class="small text-muted">
+                                                    <i class="fa fa-user me-1"></i> <t t-esc="log.user_name"/>
+                                                    <t t-if="log.notes"> • <span class="fst-italic" t-esc="log.notes"/></t>
+                                                </div>
+                                            </div>
+                                        </t>
+                                    </div>
+                                </t>
+                            </div>
+                            <div class="modal-footer bg-white px-4 py-3">
+                                <button type="button" class="btn btn-secondary btn-lg fw-bold px-4" t-on-click="closeHistoryModal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+
+            <!-- MODAL: MOVE PARCEL TO ANOTHER RACK -->
+            <t t-if="state.relocateModalOpen">
+                <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.65);" role="dialog">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content rounded-4 shadow-lg border-0 overflow-hidden">
+                            <div class="modal-header bg-primary text-white px-4 py-3">
+                                <h4 class="modal-title fw-bold">
+                                    <i class="fa fa-arrows me-2"></i> Move Parcel to Another Rack
+                                </h4>
+                                <button type="button" class="btn-close btn-close-white" t-on-click="closeRelocateModal"></button>
+                            </div>
+                            <div class="modal-body p-4 bg-white fs-5">
+                                <p class="mb-3">Select the new destination Rack / Bin for <strong class="text-primary" t-esc="state.relocateParcelName"></strong>:</p>
+                                <select class="form-select form-select-lg fs-4 fw-bold py-2 mb-3" t-model="state.selectedNewLocationId">
+                                    <option value="">-- Choose Target Rack / Bin --</option>
+                                    <t t-foreach="state.warehouseRacks" t-as="r" t-key="r.id">
+                                        <option t-att-value="r.id" t-esc="r.complete_name"></option>
+                                    </t>
+                                </select>
+                                <input type="text" class="form-control form-control-lg" placeholder="Reason (e.g. Rack reorganization)" t-model="state.relocateReason"/>
+                            </div>
+                            <div class="modal-footer bg-light px-4 py-3">
+                                <button type="button" class="btn btn-outline-secondary btn-lg fw-bold" t-on-click="closeRelocateModal">Cancel</button>
+                                <button type="button" class="btn btn-primary btn-lg fw-bold px-4" t-on-click="confirmRelocate">
+                                    <i class="fa fa-check me-2"></i> Confirm Move
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </t>
+
+        </div>
+    </t>
+
+</templates>

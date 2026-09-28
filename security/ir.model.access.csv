@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_brandix_docket_parcel_location_history_user,brandix.docket.parcel.location.history.user,model_brandix_docket_parcel_location_history,stock.group_stock_user,1,1,1,0
+access_brandix_docket_parcel_location_history_manager,brandix.docket.parcel.location.history.manager,model_brandix_docket_parcel_location_history,stock.group_stock_manager,1,1,1,1
