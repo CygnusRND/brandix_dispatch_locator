@@ -242,6 +242,14 @@ class BrandixDispatchLocator(models.TransientModel):
 
         # 4. Embellishment (EMB) Pool & Status
         is_emb = (getattr(docket, 'style_type', '') == 'emb')
+        is_delivered = (getattr(docket, 'delivery_status', 'pending') == 'done')
+
+        if sched and hasattr(sched, '_compute_emb_pool'):
+            try:
+                sched._compute_emb_pool()
+            except Exception as e:
+                pass
+
         emb_pool_balance = float(getattr(sched, 'remaining_emb_balance', 0.0) if sched else 0.0)
         emb_pool_received = float(getattr(sched, 'total_emb_received_qty', 0.0) if sched else 0.0)
         emb_status = docket.emb_status or (getattr(sched, 'emb_status', 'pending') if sched else 'pending')
@@ -253,21 +261,48 @@ class BrandixDispatchLocator(models.TransientModel):
 
         req_emb_qty = float(getattr(docket, 'docket_qty', 0.0) or getattr(docket, 'co_qty', 0.0) or 0.0)
 
-        # If schedule pool balance is 0 but direct validated receipt exists for this docket
-        if has_validated_emb and emb_pool_balance == 0.0 and req_emb_qty > 0.0:
-            emb_pool_balance = req_emb_qty
-            emb_pool_received = req_emb_qty
+        # Check for direct docket-level receipt (specific to this docket)
+        ComponentReceipt = self.env['brandix.component.receipt'].sudo() if 'brandix.component.receipt' in self.env else None
+        has_direct_docket_emb = False
+        direct_emb_qty = 0.0
+        if ComponentReceipt and is_emb and docket and docket.id:
+            try:
+                direct_emb_grns = ComponentReceipt.search([
+                    ('docket_id', '=', docket.id),
+                    ('component_type', '=', 'emb'),
+                    ('receipt_level', '=', 'docket'),
+                    ('state', '=', 'validated')
+                ])
+                if direct_emb_grns:
+                    has_direct_docket_emb = True
+                    direct_emb_qty = sum(direct_emb_grns.mapped('received_qty'))
+                    if direct_emb_qty == 0.0:
+                        direct_emb_qty = req_emb_qty
+            except Exception:
+                has_direct_docket_emb = False
 
-        bal_after = emb_pool_balance - req_emb_qty if getattr(docket, 'delivery_status', 'pending') != 'done' else emb_pool_balance
-        is_sufficient = (emb_pool_balance >= req_emb_qty) or (getattr(docket, 'delivery_status', 'pending') == 'done') or has_validated_emb
+        if has_direct_docket_emb:
+            avail_qty = direct_emb_qty
+            emb_pool_balance = direct_emb_qty
+            emb_pool_received = direct_emb_qty
+        else:
+            avail_qty = emb_pool_balance
 
-        is_emb_ready = (
-            (not is_emb)
-            or (emb_status in ('ok', 'ready', 'issued'))
-            or (getattr(docket, 'delivery_status', 'pending') == 'done')
-            or has_validated_emb
-            or (emb_pool_balance >= req_emb_qty and (emb_pool_balance > 0 or req_emb_qty == 0))
-        )
+        if is_delivered:
+            bal_after = avail_qty
+            is_sufficient = True
+            is_emb_ready = True
+            shortage_qty = 0
+        elif not is_emb:
+            bal_after = 0
+            is_sufficient = True
+            is_emb_ready = True
+            shortage_qty = 0
+        else:
+            bal_after = avail_qty - req_emb_qty
+            is_sufficient = (avail_qty >= req_emb_qty) and (avail_qty > 0 or req_emb_qty == 0)
+            is_emb_ready = is_sufficient
+            shortage_qty = max(0, int(req_emb_qty - avail_qty))
 
         emb_info = {
             'is_emb_style': is_emb,
@@ -278,8 +313,8 @@ class BrandixDispatchLocator(models.TransientModel):
             'pool_received': int(emb_pool_received),
             'balance_after_dispatch': int(bal_after),
             'is_sufficient': is_sufficient,
-            'shortage_qty': int(max(0.0, req_emb_qty - emb_pool_balance)) if not is_sufficient else 0,
-            'is_delivered': getattr(docket, 'delivery_status', 'pending') == 'done',
+            'shortage_qty': int(shortage_qty),
+            'is_delivered': is_delivered,
             'location_name': emb_location,
             'parcels': emb_parcels,
             'receipt_groups': emb_data.get('receipt_groups', []),
