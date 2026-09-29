@@ -375,6 +375,18 @@ class BrandixDispatchLocator(models.TransientModel):
             except Exception as e:
                 _logger.warning("Error building docket details for %s in schedule %s: %s", getattr(doc, 'name', 'unknown'), getattr(sched, 'name', 'unknown'), str(e))
 
+        # Force fresh calculation of emb pool and schedule component status
+        if hasattr(sched, '_compute_emb_pool'):
+            try:
+                sched._compute_emb_pool()
+            except Exception as e:
+                _logger.warning("Could not recompute emb pool for schedule %s: %s", getattr(sched, 'name', 'unknown'), str(e))
+        if hasattr(sched, '_compute_schedule_component_status'):
+            try:
+                sched._compute_schedule_component_status()
+            except Exception as e:
+                _logger.warning("Could not recompute component status for schedule %s: %s", getattr(sched, 'name', 'unknown'), str(e))
+
         # Schedule-level component locations
         sched_trims = self._get_component_info(None, sched, comp_type='trim')
         sched_emb = self._get_component_info(None, sched, comp_type='emb')
@@ -428,14 +440,26 @@ class BrandixDispatchLocator(models.TransientModel):
             except Exception as e:
                 _logger.warning("Error building docket details for %s in schedule %s: %s", getattr(doc, 'name', 'unknown'), sched_name, str(e))
 
-        first_trims = self._get_component_info(first_doc, None, comp_type='trim')
-        first_emb = self._get_component_info(first_doc, None, comp_type='emb')
+        first_trims = self._get_component_info(None, None, comp_type='trim')
+        first_emb = self._get_component_info(None, None, comp_type='emb')
+
+        ScheduleMaster = self.env['brandix.schedule.master'].sudo() if 'brandix.schedule.master' in self.env else None
+        sched_obj = None
+        if ScheduleMaster:
+            sched_obj = ScheduleMaster.search([('name', '=ilike', sched_name)], limit=1)
+            if sched_obj and hasattr(sched_obj, '_compute_emb_pool'):
+                try:
+                    sched_obj._compute_emb_pool()
+                except Exception:
+                    pass
+        emb_bal = getattr(sched_obj, 'remaining_emb_balance', 0.0) if sched_obj else 0.0
+        emb_rcvd = getattr(sched_obj, 'total_emb_received_qty', 0.0) if sched_obj else 0.0
 
         return {
             'status': 'success',
             'query_type': 'schedule',
             'schedule': {
-                'id': 0,
+                'id': sched_obj.id if sched_obj else 0,
                 'schedule_no': sched_name,
                 'style_code': first_doc.style_code or '-',
                 'buyer_customer': first_doc.buyer_customer or '-',
@@ -444,12 +468,12 @@ class BrandixDispatchLocator(models.TransientModel):
                 'mo_qty': 0.0,
                 'style_type': first_doc.style_type or 'non_emb',
                 'style_type_label': 'EMBELLISHMENT (EMB)' if first_doc.style_type == 'emb' else 'NON-EMB',
-                'trims_status': first_doc.trims_status or 'pending',
+                'trims_status': getattr(sched_obj, 'trims_status', False) or first_doc.trims_status or 'pending',
                 'first_issued_docket': first_doc.trims_issued_with_docket_id.name if first_doc.trims_issued_with_docket_id else '',
                 'trims_issued_date': '',
                 'trims_location': first_trims['location_display'],
-                'emb_pool_balance': 0.0,
-                'emb_pool_received': 0.0,
+                'emb_pool_balance': emb_bal,
+                'emb_pool_received': emb_rcvd,
                 'emb_location': first_emb['location_display'],
                 'total_dockets_count': len(dockets_summary),
                 'ready_dockets_count': len([d for d in dockets_summary if d['can_issue']]),
@@ -623,35 +647,56 @@ class BrandixDispatchLocator(models.TransientModel):
                 has_rel_sched = False
 
             # Direct SQL on brandix_component_receipt_line joined with brandix_component_receipt and stock_location
-            exact_barcodes = list(barcode_patterns) or ['']
-            ilike_barcodes = [f"%{b}%" for b in barcode_patterns if b] or ['%NONE%']
-            exact_sched_names = sched_name_list
+            exact_sched_names = [s for s in sched_name_list if s] or ['%NONE%']
             ilike_sched_names = [f"%{s}%" for s in sched_name_list if s] or ['%NONE%']
 
-            where_clauses = [
-                "bcrl.barcode = ANY(%s)",
-                "bcrl.barcode ILIKE ANY(%s)",
-                "(bcr.docket_id IS NOT NULL AND bcr.docket_id = %s)",
-                "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id = ANY(%s))",
-                "(bcr.schedule_master_id IS NOT NULL AND bcr.schedule_master_id IN (SELECT id FROM brandix_schedule_master WHERE name = ANY(%s) OR name ILIKE ANY(%s)))"
-            ]
-            params = [
-                comp_type,
-                exact_barcodes,
-                ilike_barcodes,
-                docket_id,
-                sched_id_list,
-                exact_sched_names,
-                ilike_sched_names
-            ]
+            if docket:
+                # 1. Docket-level receipts: MUST belong specifically to this docket
+                docket_conditions = ["(bcr.receipt_level = 'docket' AND (bcr.docket_id = %s"]
+                docket_params = [docket_id]
+                if has_rel_docket and docket_id:
+                    docket_conditions.append("OR bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s)")
+                    docket_params.append(docket_id)
+                if docket_name:
+                    docket_conditions.append("OR bcrl.barcode = %s OR bcrl.barcode ILIKE %s")
+                    docket_params.extend([docket_name, f"%{docket_name}%"])
+                docket_clause = " ".join(docket_conditions) + "))"
 
-            if has_rel_docket and docket_id:
-                where_clauses.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_docket_rel WHERE docket_id = %s))")
-                params.append(docket_id)
+                # 2. Schedule-level receipts: belong to any docket in this schedule
+                sched_conditions = [
+                    "(bcr.receipt_level = 'schedule' AND ("
+                    "bcr.schedule_master_id = ANY(%s) "
+                    "OR bcr.schedule_master_id IN (SELECT id FROM brandix_schedule_master WHERE name = ANY(%s) OR name ILIKE ANY(%s))"
+                ]
+                sched_params = [sched_id_list, exact_sched_names, ilike_sched_names]
+                if has_rel_sched and sched_id_list and sched_id_list != [0]:
+                    sched_conditions.append("OR bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s))")
+                    sched_params.append(sched_id_list)
+                if exact_sched_names != ['%NONE%']:
+                    sched_conditions.append("OR bcrl.barcode = ANY(%s) OR bcrl.barcode ILIKE ANY(%s)")
+                    sched_params.extend([exact_sched_names, ilike_sched_names])
+                sched_clause = " ".join(sched_conditions) + "))"
 
-            if has_rel_sched and sched_id_list and sched_id_list != [0]:
-                where_clauses.append("(bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s)))")
-                params.append(sched_id_list)
+                filter_clause = f"({docket_clause} OR {sched_clause})"
+                params = [comp_type] + docket_params + sched_params
+            else:
+                # Schedule-level search: only schedule-level receipts apply!
+                sched_conditions = [
+                    "(bcr.receipt_level = 'schedule' AND ("
+                    "bcr.schedule_master_id = ANY(%s) "
+                    "OR bcr.schedule_master_id IN (SELECT id FROM brandix_schedule_master WHERE name = ANY(%s) OR name ILIKE ANY(%s))"
+                ]
+                sched_params = [sched_id_list, exact_sched_names, ilike_sched_names]
+                if has_rel_sched and sched_id_list and sched_id_list != [0]:
+                    sched_conditions.append("OR bcr.id IN (SELECT receipt_id FROM component_receipt_schedule_rel WHERE schedule_id = ANY(%s))")
+                    sched_params.append(sched_id_list)
+                if exact_sched_names != ['%NONE%']:
+                    sched_conditions.append("OR bcrl.barcode = ANY(%s) OR bcrl.barcode ILIKE ANY(%s)")
+                    sched_params.extend([exact_sched_names, ilike_sched_names])
+                sched_clause = " ".join(sched_conditions) + "))"
+
+                filter_clause = sched_clause
+                params = [comp_type] + sched_params
 
             sql = f"""
                 SELECT DISTINCT
@@ -670,9 +715,7 @@ class BrandixDispatchLocator(models.TransientModel):
                 JOIN stock_location sl ON bcrl.location_id = sl.id
                 WHERE bcr.state = 'validated'
                   AND bcr.component_type = %s
-                  AND (
-                      {' OR '.join(where_clauses)}
-                  )
+                  AND {filter_clause}
                 ORDER BY bcr.id DESC, bcrl.parcel_no ASC
             """
 
@@ -851,8 +894,38 @@ class BrandixDispatchLocator(models.TransientModel):
                 self.env.cr.execute("UPDATE brandix_docket_parcel_location SET location_dest_id = NULL WHERE id IN %s", (tuple(cut_parcels.ids),))
                 ParcelLoc.invalidate_model(['location_dest_id'])
 
-        # 2. Trims Parcels (if carrier docket or schedule trims status is issued)
+        # 2. Trims Parcels
         if CompLine and History:
+            # 2a. Direct Docket-wise Trims for this docket:
+            direct_trim_lines = CompLine.search([
+                ('receipt_id.component_type', '=', 'trim'),
+                ('receipt_id.receipt_level', '=', 'docket'),
+                ('receipt_id.state', '=', 'validated'),
+                ('location_id', '!=', False),
+                '|', ('receipt_id.docket_id', '=', docket.id), ('barcode', '=ilike', f"%{docket_name}%")
+            ])
+            if direct_trim_lines:
+                for tl in direct_trim_lines:
+                    old_loc = tl.location_id
+                    rec_name = tl.receipt_id.name if tl.receipt_id else ''
+                    History.create({
+                        'component_receipt_line_id': tl.id,
+                        'parcel_type': 'trim',
+                        'parcel_number': tl.parcel_no,
+                        'parcel_name': f"Trims Parcel #{tl.parcel_no} ({rec_name})",
+                        'docket_id': docket.id,
+                        'old_location_id': old_loc.id,
+                        'new_location_id': False,
+                        'old_location_name': old_loc.display_name,
+                        'new_location_name': f"OUT - Issued to Production Line (Module: {module_name}, Docket: {docket_name})",
+                        'user_id': self.env.user.id,
+                        'change_date': fields.Datetime.now(),
+                        'notes': f"Dispatched to Line with Docket {docket_name}"
+                    })
+                self.env.cr.execute("UPDATE brandix_component_receipt_line SET location_id = NULL WHERE id IN %s", (tuple(direct_trim_lines.ids),))
+                CompLine.invalidate_model(['location_id'])
+
+            # 2b. Schedule-wise Trims (cleared when carrier docket is issued):
             schedules = docket.schedule_master_ids or docket.schedule_master_id
             if not schedules and docket.schedule_no and 'brandix.schedule.master' in self.env:
                 sched_names = [s.strip() for s in str(docket.schedule_no).replace(';', ',').split(',') if s.strip()]
@@ -863,6 +936,7 @@ class BrandixDispatchLocator(models.TransientModel):
                 if is_carrier or sched.trims_status == 'issued':
                     trim_lines = CompLine.search([
                         ('receipt_id.component_type', '=', 'trim'),
+                        ('receipt_id.receipt_level', '=', 'schedule'),
                         ('receipt_id.state', '=', 'validated'),
                         ('location_id', '!=', False),
                         '|', ('receipt_id.schedule_master_id', '=', sched.id), ('receipt_id.schedule_master_id.name', '=ilike', sched.name)
@@ -892,6 +966,7 @@ class BrandixDispatchLocator(models.TransientModel):
         if CompLine and History:
             emb_lines = CompLine.search([
                 ('receipt_id.component_type', '=', 'emb'),
+                ('receipt_id.receipt_level', '=', 'docket'),
                 ('receipt_id.state', '=', 'validated'),
                 ('location_id', '!=', False),
                 '|', ('receipt_id.docket_id', '=', docket.id), ('barcode', '=ilike', f"%{docket_name}%")
